@@ -1,0 +1,174 @@
+---
+title: Introduction
+description: A production-ready Next.js authentication boilerplate with Better Auth, Drizzle ORM, and JWT/JWKS backend integration
+---
+
+<img
+  className="block dark:hidden"
+  src="/images/hero-light.svg"
+  alt="Auth UI Boilerplate Hero"
+/>
+<img
+  className="hidden dark:block"
+  src="/images/hero-dark.svg"
+  alt="Auth UI Boilerplate Hero"
+/>
+
+## What is Auth UI Boilerplate?
+
+Auth UI Boilerplate is a **production-ready Next.js authentication starter** that combines modern authentication with seamless backend integration. Built with [Better Auth](https://better-auth.com), [Drizzle ORM](https://orm.drizzle.team/), and JWT/JWKS verification, it provides everything you need to add secure authentication to your full-stack application.
+
+Unlike traditional auth solutions that require shared secrets between frontend and backend, this boilerplate uses **JWT tokens verified via JWKS** (JSON Web Key Set) — enabling secure, stateless authentication across microservices without exposing private keys.
+
+## Why Use This Boilerplate?
+
+Building authentication from scratch is time-consuming and error-prone. This boilerplate eliminates weeks of setup by providing:
+
+**Zero Shared Secrets** — Your backend fetches public keys from `/api/auth/jwks` to verify JWTs. No need to sync secrets across services.
+
+**Multiple Auth Methods** — Email/password and Google OAuth work out of the box. Add GitHub, Discord, or other providers with minimal configuration.
+
+**Type-Safe Database** — Drizzle ORM provides end-to-end type safety with PostgreSQL, including auto-generated tables for users, sessions, accounts, and JWKS keys.
+
+**Automatic JWT Injection** — The built-in API proxy at `/api/[...path]` forwards requests to your backend with JWT bearer tokens automatically attached.
+
+**Dev Container Ready** — One-click setup with VS Code Dev Containers provides Node.js (via Volta), Python, and PostgreSQL 18 pre-configured.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card
+    title="Better Auth Integration"
+    icon="shield-check"
+    href="https://better-auth.com"
+  >
+    Modern authentication library with built-in JWT/JWKS plugin, session management, and social provider support
+  </Card>
+  <Card
+    title="Drizzle ORM"
+    icon="database"
+    href="https://orm.drizzle.team"
+  >
+    Type-safe PostgreSQL schema with migrations, visual database browser (Drizzle Studio), and full TypeScript support
+  </Card>
+  <Card
+    title="JWT/JWKS Verification"
+    icon="key"
+  >
+    Backend integration via public key cryptography — no shared secrets required between frontend and backend services
+  </Card>
+  <Card
+    title="API Proxy with Auto Auth"
+    icon="route"
+  >
+    Server-side proxy automatically injects JWT tokens into backend requests, avoiding CORS issues and keeping credentials secure
+  </Card>
+  <Card
+    title="Google OAuth"
+    icon="google"
+  >
+    Pre-configured Google sign-in with easy setup — just add your OAuth credentials from Google Cloud Console
+  </Card>
+  <Card
+    title="Email/Password Auth"
+    icon="envelope"
+  >
+    Traditional authentication with secure password hashing, email verification support, and customizable validation
+  </Card>
+  <Card
+    title="Backend Examples"
+    icon="code"
+  >
+    Complete integration guides for Go, Python (Flask/FastAPI), and Express.js — verify JWTs in any language
+  </Card>
+  <Card
+    title="shadcn/ui Components"
+    icon="palette"
+    href="https://ui.shadcn.com"
+  >
+    Beautiful, accessible UI components with dark mode support via next-themes and Tailwind CSS
+  </Card>
+</CardGroup>
+
+## How It Works
+
+The boilerplate follows a simple, secure authentication flow:
+
+<Steps>
+  <Step title="User Authentication">
+    Users sign in via email/password or Google OAuth. Better Auth creates a session and stores it in PostgreSQL.
+  </Step>
+  <Step title="JWT Generation">
+    When the frontend needs to call your backend, it requests a JWT from Better Auth. The JWT is signed with a private Ed25519 key stored in the database.
+  </Step>
+  <Step title="Token Injection">
+    The API proxy (`/api/[...path]/route.ts`) automatically retrieves the JWT and injects it as a Bearer token in the `Authorization` header when forwarding requests to your backend.
+  </Step>
+  <Step title="Backend Verification">
+    Your backend fetches the public key from `{BETTER_AUTH_URL}/api/auth/jwks` and verifies the JWT signature. No shared secrets needed!
+  </Step>
+</Steps>
+
+## What's Included
+
+```text
+src/
+├── app/
+│   ├── api/auth/[...all]/   # Better Auth API handler
+│   ├── api/[...path]/       # JWT-injecting API proxy
+│   ├── login/ & signup/     # Authentication pages
+│   └── page.tsx             # Home page with integration guides
+├── components/
+│   ├── ui/                  # shadcn/ui primitives
+│   ├── auth-status.tsx      # Session display component
+│   ├── api-test.tsx         # Backend API testing (fetch)
+│   ├── api-test-axios.tsx   # Backend API testing (axios)
+│   ├── login-required.tsx   # Auth guard HOC
+│   └── theme-toggle.tsx     # Dark mode switcher
+├── lib/
+│   ├── auth.ts              # Better Auth server config
+│   ├── auth-client.ts       # Better Auth client
+│   ├── api-client.ts        # Fetch-based API client
+│   └── api-client-axios.ts  # Axios-based API client
+└── db/
+    ├── schema.ts            # Drizzle schema (users, sessions, jwks)
+    ├── index.ts             # Database client
+    └── migrations/          # SQL migration files
+```
+
+## Quick Links
+
+<CardGroup cols={2}>
+  <Card
+    title="Quickstart Guide"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Get up and running in 5 minutes with Dev Container
+  </Card>
+  <Card
+    title="Manual Setup"
+    icon="wrench"
+    href="/manual-setup"
+  >
+    Install without Dev Container on any system
+  </Card>
+  <Card
+    title="Environment Variables"
+    icon="gear"
+    href="/configuration/environment-variables"
+  >
+    Configure database, auth, and OAuth settings
+  </Card>
+  <Card
+    title="Backend Integration"
+    icon="server"
+    href="/backend/overview"
+  >
+    Connect Go, Python, or Node.js backends
+  </Card>
+</CardGroup>
+
+<Note>
+  This boilerplate is based on [dreamsofcode-io/authly](https://github.com/dreamsofcode-io/authly) and has been extended with JWKS support, API proxy, and comprehensive backend integration examples.
+</Note>

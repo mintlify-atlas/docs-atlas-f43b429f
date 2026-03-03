@@ -1,0 +1,539 @@
+---
+title: Python Backend Example
+description: Complete guide to JWT verification in Python using Flask and PyJWT
+---
+
+This guide shows how to verify Better Auth JWTs in a Python backend using Flask and the `PyJWT` library with `PyJWKClient` for JWKS fetching.
+
+## Installation
+
+Install the required dependencies:
+
+```bash
+pip install flask PyJWT cryptography
+```
+
+- `flask`: Web framework
+- `PyJWT`: JWT encoding/decoding and verification
+- `cryptography`: Required for EdDSA (Ed25519) signature verification
+
+## Basic Example
+
+Here's a complete Flask application with JWT verification:
+
+```python app.py
+import jwt
+from jwt import PyJWKClient
+from functools import wraps
+from flask import Flask, request, jsonify
+import os
+
+app = Flask(__name__)
+
+# Configuration
+JWKS_URL = os.getenv("BETTER_AUTH_URL", "http://localhost:3000") + "/api/auth/jwks"
+ISSUER = os.getenv("BETTER_AUTH_URL", "http://localhost:3000")
+AUDIENCE = os.getenv("BETTER_AUTH_URL", "http://localhost:3000")
+
+# JWKS client with automatic caching
+jwks_client = PyJWKClient(JWKS_URL)
+
+def require_auth(f):
+    """Decorator to require JWT authentication on routes"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # Extract token from Authorization header
+        auth = request.headers.get("Authorization", "")
+        if not auth.startswith("Bearer "):
+            return jsonify({"error": "Unauthorized"}), 401
+        
+        token = auth.removeprefix("Bearer ")
+        
+        try:
+            # Get the signing key from JWKS
+            signing_key = jwks_client.get_signing_key_from_jwt(token)
+            
+            # Verify and decode the JWT
+            payload = jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=["EdDSA", "RS256"],
+                issuer=ISSUER,
+                audience=AUDIENCE
+            )
+            
+            # Add user data to request context
+            request.user = payload
+            
+        except jwt.InvalidTokenError as e:
+            return jsonify({"error": str(e)}), 401
+        
+        return f(*args, **kwargs)
+    
+    return decorated
+
+@app.route("/api/me")
+@require_auth
+def me():
+    """Protected route that returns current user info"""
+    return jsonify({
+        "sub": request.user["sub"],
+        "email": request.user.get("email"),
+        "name": request.user.get("name")
+    })
+
+@app.route("/health")
+def health():
+    """Public health check endpoint"""
+    return jsonify({"status": "ok"})
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
+```
+
+## Middleware Pattern
+
+For more complex applications, create a reusable auth middleware:
+
+```python auth/middleware.py
+import jwt
+from jwt import PyJWKClient
+from functools import wraps
+from flask import request, jsonify, g
+import os
+
+class AuthMiddleware:
+    def __init__(self, jwks_url, issuer, audience):
+        self.jwks_client = PyJWKClient(jwks_url)
+        self.issuer = issuer
+        self.audience = audience
+    
+    def verify_token(self, token):
+        """Verify JWT and return payload"""
+        try:
+            signing_key = self.jwks_client.get_signing_key_from_jwt(token)
+            
+            payload = jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=["EdDSA", "RS256"],
+                issuer=self.issuer,
+                audience=self.audience
+            )
+            
+            return payload
+        except jwt.ExpiredSignatureError:
+            raise AuthError("Token expired", 401)
+        except jwt.InvalidIssuerError:
+            raise AuthError("Invalid issuer", 401)
+        except jwt.InvalidAudienceError:
+            raise AuthError("Invalid audience", 401)
+        except jwt.InvalidTokenError as e:
+            raise AuthError(f"Invalid token: {str(e)}", 401)
+    
+    def require_auth(self, f):
+        """Decorator to require authentication"""
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            auth = request.headers.get("Authorization", "")
+            
+            if not auth.startswith("Bearer "):
+                return jsonify({"error": "Unauthorized"}), 401
+            
+            token = auth.removeprefix("Bearer ")
+            
+            try:
+                payload = self.verify_token(token)
+                g.user = payload  # Store in Flask's g object
+            except AuthError as e:
+                return jsonify({"error": e.message}), e.status_code
+            
+            return f(*args, **kwargs)
+        
+        return decorated
+    
+    def optional_auth(self, f):
+        """Decorator for optional authentication"""
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            auth = request.headers.get("Authorization", "")
+            
+            if auth.startswith("Bearer "):
+                token = auth.removeprefix("Bearer ")
+                try:
+                    payload = self.verify_token(token)
+                    g.user = payload
+                except AuthError:
+                    g.user = None
+            else:
+                g.user = None
+            
+            return f(*args, **kwargs)
+        
+        return decorated
+
+class AuthError(Exception):
+    """Custom exception for authentication errors"""
+    def __init__(self, message, status_code):
+        self.message = message
+        self.status_code = status_code
+        super().__init__(self.message)
+```
+
+Use the middleware in your app:
+
+```python app.py
+from flask import Flask, jsonify, g
+from auth.middleware import AuthMiddleware
+import os
+
+app = Flask(__name__)
+
+# Initialize auth middleware
+auth = AuthMiddleware(
+    jwks_url=os.getenv("BETTER_AUTH_URL", "http://localhost:3000") + "/api/auth/jwks",
+    issuer=os.getenv("BETTER_AUTH_URL", "http://localhost:3000"),
+    audience=os.getenv("BETTER_AUTH_URL", "http://localhost:3000")
+)
+
+@app.route("/api/me")
+@auth.require_auth
+def get_profile():
+    return jsonify({
+        "sub": g.user["sub"],
+        "email": g.user.get("email"),
+        "name": g.user.get("name")
+    })
+
+@app.route("/api/posts")
+@auth.optional_auth
+def get_posts():
+    # g.user is available if authenticated, None otherwise
+    if g.user:
+        return jsonify({"posts": [], "user": g.user["sub"]})
+    else:
+        return jsonify({"posts": [], "user": None})
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"})
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8080))
+    app.run(host="0.0.0.0", port=port, debug=True)
+```
+
+## FastAPI Example
+
+If you're using FastAPI instead of Flask:
+
+```python main.py
+from fastapi import FastAPI, Depends, HTTPException, Header
+from typing import Optional
+import jwt
+from jwt import PyJWKClient
+import os
+
+app = FastAPI()
+
+# Configuration
+JWKS_URL = os.getenv("BETTER_AUTH_URL", "http://localhost:3000") + "/api/auth/jwks"
+ISSUER = os.getenv("BETTER_AUTH_URL", "http://localhost:3000")
+AUDIENCE = os.getenv("BETTER_AUTH_URL", "http://localhost:3000")
+
+jwks_client = PyJWKClient(JWKS_URL)
+
+def get_current_user(authorization: Optional[str] = Header(None)):
+    """Dependency for extracting authenticated user"""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    token = authorization.removeprefix("Bearer ")
+    
+    try:
+        signing_key = jwks_client.get_signing_key_from_jwt(token)
+        payload = jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["EdDSA", "RS256"],
+            issuer=ISSUER,
+            audience=AUDIENCE
+        )
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
+
+@app.get("/api/me")
+def get_profile(user=Depends(get_current_user)):
+    return {
+        "sub": user["sub"],
+        "email": user.get("email"),
+        "name": user.get("name")
+    }
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+```
+
+## Error Handling
+
+Handle different JWT error cases:
+
+```python auth/errors.py
+import jwt
+from flask import jsonify
+
+def handle_jwt_error(error):
+    """Convert JWT errors to JSON responses"""
+    error_map = {
+        jwt.ExpiredSignatureError: ("Token has expired", 401),
+        jwt.InvalidIssuerError: ("Invalid token issuer", 401),
+        jwt.InvalidAudienceError: ("Invalid token audience", 401),
+        jwt.InvalidSignatureError: ("Invalid token signature", 401),
+        jwt.DecodeError: ("Token decode error", 401),
+        jwt.InvalidTokenError: ("Invalid token", 401),
+    }
+    
+    for error_type, (message, status) in error_map.items():
+        if isinstance(error, error_type):
+            return jsonify({"error": message}), status
+    
+    # Default error
+    return jsonify({"error": "Authentication failed"}), 401
+```
+
+Use in your middleware:
+
+```python
+try:
+    payload = self.verify_token(token)
+    g.user = payload
+except jwt.InvalidTokenError as e:
+    return handle_jwt_error(e)
+```
+
+## Configuration Management
+
+Use a config class for better organization:
+
+```python config.py
+import os
+from dataclasses import dataclass
+
+@dataclass
+class Config:
+    better_auth_url: str
+    jwks_url: str
+    issuer: str
+    audience: str
+    port: int
+    debug: bool
+    
+    @classmethod
+    def from_env(cls):
+        base_url = os.getenv("BETTER_AUTH_URL", "http://localhost:3000")
+        return cls(
+            better_auth_url=base_url,
+            jwks_url=f"{base_url}/api/auth/jwks",
+            issuer=base_url,
+            audience=base_url,
+            port=int(os.getenv("PORT", 8080)),
+            debug=os.getenv("DEBUG", "False").lower() == "true"
+        )
+```
+
+Use in your app:
+
+```python
+from config import Config
+
+config = Config.from_env()
+auth = AuthMiddleware(
+    jwks_url=config.jwks_url,
+    issuer=config.issuer,
+    audience=config.audience
+)
+```
+
+## Testing
+
+Test your JWT verification:
+
+```python test_auth.py
+import pytest
+from app import app
+import jwt
+import time
+
+@pytest.fixture
+def client():
+    app.config['TESTING'] = True
+    with app.test_client() as client:
+        yield client
+
+def test_protected_route_without_token(client):
+    """Test that protected route rejects requests without token"""
+    response = client.get('/api/me')
+    assert response.status_code == 401
+    assert b'Unauthorized' in response.data
+
+def test_protected_route_with_invalid_token(client):
+    """Test that protected route rejects invalid tokens"""
+    headers = {'Authorization': 'Bearer invalid.token.here'}
+    response = client.get('/api/me', headers=headers)
+    assert response.status_code == 401
+
+def test_health_endpoint(client):
+    """Test that public endpoint works without auth"""
+    response = client.get('/health')
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data['status'] == 'ok'
+
+# For integration tests with real tokens, you'd need to:
+# 1. Set up a test Better Auth instance
+# 2. Generate test tokens
+# 3. Verify they work with your backend
+```
+
+## Environment Variables
+
+Create a `.env` file for development:
+
+```bash .env
+BETTER_AUTH_URL=http://localhost:3000
+PORT=8080
+DEBUG=True
+```
+
+Load environment variables using `python-dotenv`:
+
+```bash
+pip install python-dotenv
+```
+
+```python app.py
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+# Now os.getenv() will read from .env file
+```
+
+## Production Deployment
+
+For production, use a production-grade WSGI server like Gunicorn:
+
+```bash
+pip install gunicorn
+```
+
+Run with:
+
+```bash
+gunicorn app:app --bind 0.0.0.0:8080 --workers 4
+```
+
+Or create a `Procfile` for platforms like Heroku:
+
+```
+web: gunicorn app:app
+```
+
+## Docker Example
+
+Create a `Dockerfile`:
+
+```dockerfile Dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 8080
+
+CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:8080", "--workers", "4"]
+```
+
+`requirements.txt`:
+
+```txt
+flask==3.0.0
+PyJWT==2.8.0
+cryptography==41.0.7
+gunicorn==21.2.0
+python-dotenv==1.0.0
+```
+
+Build and run:
+
+```bash
+docker build -t my-backend .
+docker run -p 8080:8080 -e BETTER_AUTH_URL=http://localhost:3000 my-backend
+```
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="ModuleNotFoundError: No module named 'cryptography'">
+    The `cryptography` package is required for EdDSA signature verification:
+    
+    ```bash
+    pip install cryptography
+    ```
+  </Accordion>
+  
+  <Accordion title="'invalid signature' error">
+    Verify that:
+    1. JWKS URL is correct and accessible
+    2. Token was issued by the correct Better Auth instance
+    3. Issuer and audience match your configuration
+    
+    ```python
+    # Test JWKS endpoint
+    import requests
+    response = requests.get("http://localhost:3000/api/auth/jwks")
+    print(response.json())
+    ```
+  </Accordion>
+  
+  <Accordion title="Token expired errors">
+    JWTs have limited lifetime. Ensure your frontend refreshes tokens before expiration. The `api-client.ts` handles this with a 10-second buffer.
+  </Accordion>
+  
+  <Accordion title="CORS errors in development">
+    If your frontend and backend are on different ports, enable CORS:
+    
+    ```bash
+    pip install flask-cors
+    ```
+    
+    ```python
+    from flask_cors import CORS
+    
+    app = Flask(__name__)
+    CORS(app)  # Enable CORS for all routes
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Go Example" icon="golang" href="/backend/go-example">
+    See how to implement JWT verification in Go
+  </Card>
+  
+  <Card title="Express Example" icon="node-js" href="/backend/express-example">
+    Learn how to verify JWTs in Express.js with jose
+  </Card>
+</CardGroup>

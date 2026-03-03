@@ -1,0 +1,219 @@
+---
+title: Authentication
+description: Learn how Better Auth powers email/password and OAuth authentication in this boilerplate
+icon: lock
+---
+
+The Auth UI Boilerplate uses [Better Auth](https://better-auth.com) as its authentication framework. Better Auth is a modern, type-safe authentication library that handles email/password auth, OAuth providers, and session management out of the box.
+
+## Server-Side Configuration
+
+The main authentication configuration is in `src/lib/auth.ts`:
+
+```typescript src/lib/auth.ts
+import { betterAuth } from "better-auth";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { db } from "@/db";
+import { jwt } from "better-auth/plugins";
+
+export const auth = betterAuth({
+  database: drizzleAdapter(db, {
+    provider: "pg",
+  }),
+  emailAndPassword: {
+    enabled: true,
+  },
+  socialProviders: {
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID as string,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+    },
+  },
+  plugins: [jwt()],
+  baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
+});
+```
+
+### Key Configuration Options
+
+<AccordionGroup>
+  <Accordion title="Database Adapter" icon="database">
+    Better Auth uses the Drizzle ORM adapter to connect to PostgreSQL:
+    
+    ```typescript
+    database: drizzleAdapter(db, {
+      provider: "pg",
+    })
+    ```
+    
+    This automatically handles all database operations for users, sessions, accounts, and verification tokens.
+  </Accordion>
+
+  <Accordion title="Email & Password" icon="envelope">
+    Email/password authentication is enabled with a simple flag:
+    
+    ```typescript
+    emailAndPassword: {
+      enabled: true,
+    }
+    ```
+    
+    This provides built-in endpoints for sign-up, sign-in, and password reset.
+  </Accordion>
+
+  <Accordion title="OAuth Providers" icon="brands google">
+    Social authentication providers are configured in the `socialProviders` object:
+    
+    ```typescript
+    socialProviders: {
+      google: {
+        clientId: process.env.GOOGLE_CLIENT_ID as string,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+      },
+    }
+    ```
+    
+    Better Auth supports many providers including Google, GitHub, Discord, and more.
+  </Accordion>
+
+  <Accordion title="JWT Plugin" icon="key">
+    The JWT plugin enables token-based authentication for backend APIs:
+    
+    ```typescript
+    plugins: [jwt()]
+    ```
+    
+    Learn more in the [JWT Tokens](/features/jwt-tokens) section.
+  </Accordion>
+</AccordionGroup>
+
+## Client-Side Setup
+
+The client-side auth configuration is in `src/lib/auth-client.ts`:
+
+```typescript src/lib/auth-client.ts
+import { jwtClient } from "better-auth/client/plugins"
+import { createAuthClient } from "better-auth/react"
+
+export const authClient = createAuthClient({
+  baseURL: process.env.NEXT_PUBLIC_BETTER_AUTH_URL || "http://localhost:3000",
+  plugins: [jwtClient()],
+})
+```
+
+This client provides React hooks and methods for authentication operations in your components.
+
+## Authentication Flows
+
+### Email/Password Sign-Up
+
+When a user signs up with email and password:
+
+1. The frontend calls `authClient.signUp.email()` with credentials
+2. Better Auth validates the input and creates a new user record
+3. A session is created and stored in the database
+4. The session token is set as an HTTP-only cookie
+5. The user is automatically signed in
+
+### Google OAuth Flow
+
+When a user signs in with Google:
+
+1. The frontend redirects to Better Auth's OAuth endpoint
+2. Better Auth redirects to Google's authorization page
+3. User approves the permissions on Google
+4. Google redirects back to Better Auth with an authorization code
+5. Better Auth exchanges the code for access and ID tokens
+6. User profile is created or updated in the database
+7. A session is created and the user is signed in
+
+<Tip>
+  To add more OAuth providers, simply add them to the `socialProviders` configuration. Better Auth handles the entire OAuth flow automatically.
+</Tip>
+
+## Session Management
+
+Better Auth manages sessions using HTTP-only cookies for security. Sessions are stored in the database and include:
+
+- **Session token**: A unique, secure token for the session
+- **User association**: Links the session to a specific user
+- **Expiration time**: When the session expires
+- **Metadata**: IP address and user agent for security tracking
+
+Sessions are automatically validated on each request. When a session expires, the user must sign in again.
+
+### Accessing the Current Session
+
+In React components, use the `useSession` hook:
+
+```typescript
+import { useSession } from "@/lib/auth-client"
+
+function MyComponent() {
+  const { data: session, isPending } = useSession()
+  
+  if (isPending) return <div>Loading...</div>
+  if (!session) return <div>Not signed in</div>
+  
+  return <div>Welcome, {session.user.name}!</div>
+}
+```
+
+On the server side, access the session through Better Auth's API:
+
+```typescript
+import { auth } from "@/lib/auth"
+import { headers } from "next/headers"
+
+const session = await auth.api.getSession({
+  headers: await headers(),
+})
+```
+
+## Security Features
+
+<CardGroup cols={2}>
+  <Card title="HTTP-Only Cookies" icon="cookie-bite">
+    Session tokens are stored in HTTP-only cookies, preventing XSS attacks from accessing them.
+  </Card>
+  
+  <Card title="CSRF Protection" icon="shield-halved">
+    Better Auth includes built-in CSRF protection for all state-changing operations.
+  </Card>
+  
+  <Card title="Password Hashing" icon="hashtag">
+    Passwords are hashed using secure algorithms before storage.
+  </Card>
+  
+  <Card title="Token Rotation" icon="rotate">
+    OAuth refresh tokens are automatically rotated for enhanced security.
+  </Card>
+</CardGroup>
+
+## Environment Variables
+
+Required environment variables for authentication:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `BETTER_AUTH_URL` | Server-side base URL for Better Auth | `https://yourapp.com` |
+| `NEXT_PUBLIC_BETTER_AUTH_URL` | Client-side base URL | `https://yourapp.com` |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID | `123456789-abc.apps.googleusercontent.com` |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret | `GOCSPX-...` |
+| `BETTER_AUTH_SECRET` | Secret key for signing tokens | Generate with `openssl rand -base64 32` |
+
+<Warning>
+  Never commit secrets to version control. Use `.env.local` for development and secure secret management in production.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="JWT Tokens" icon="key" href="/features/jwt-tokens">
+    Learn how JWT tokens enable backend API authentication
+  </Card>
+  
+  <Card title="Database Schema" icon="database" href="/features/database-schema">
+    Understand the authentication database tables
+  </Card>
+</CardGroup>

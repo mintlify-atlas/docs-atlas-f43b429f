@@ -1,0 +1,248 @@
+---
+title: Environment Variables
+description: Complete reference for all environment variables in the Auth UI Boilerplate
+---
+
+The Auth UI Boilerplate uses environment variables to configure database connections, authentication, OAuth providers, and optional backend API integration. All variables are defined in `.env.example` at the root of the project.
+
+## Quick Setup
+
+Copy the example file and customize it for your environment:
+
+```bash
+cp .env.example .env
+```
+
+<Warning>
+  Never commit your `.env` file to version control. It contains sensitive credentials like OAuth secrets and database passwords.
+</Warning>
+
+## Variable Reference
+
+### Database
+
+<ParamField path="DATABASE_URL" type="string" required>
+  PostgreSQL connection string used by Drizzle ORM to connect to your database.
+  
+  **Scope:** Server-side only
+  
+  **Default (Dev Container):**
+  ```
+  postgresql://postgres:postgres@postgres:5432/postgres
+  ```
+  
+  **Format:**
+  ```
+  postgresql://[user]:[password]@[host]:[port]/[database]
+  ```
+  
+  <Note>
+    If you're using the Dev Container setup, the default value works out of the box. For manual PostgreSQL installations, update the host, port, and credentials accordingly.
+  </Note>
+  
+  Used in:
+  - `src/db/index.ts:6` - Database connection pool
+  - `drizzle.config.ts:8` - Drizzle Kit CLI operations
+</ParamField>
+
+### Better Auth
+
+Better Auth requires three environment variables: a secret for signing tokens, and server/client URLs for API endpoints.
+
+<ParamField path="BETTER_AUTH_SECRET" type="string" required>
+  Secret key used to sign authentication tokens and cookies. Must be a strong, random string.
+  
+  **Scope:** Server-side only
+  
+  **Default:** `change-me-to-a-random-secret`
+  
+  **Generate a secure secret:**
+  ```bash
+  openssl rand -base64 32
+  ```
+  
+  <Warning>
+    Always change the default secret in production. Using a weak or default secret compromises your entire authentication system.
+  </Warning>
+</ParamField>
+
+<ParamField path="BETTER_AUTH_URL" type="string" required>
+  The base URL where your Better Auth server is running. Used by server-side authentication logic.
+  
+  **Scope:** Server-side only
+  
+  **Default:** `http://localhost:3000`
+  
+  **Production example:**
+  ```
+  https://yourdomain.com
+  ```
+  
+  Used in:
+  - `src/lib/auth.ts:20` - Better Auth base URL configuration
+  - OAuth callback URLs reference this as the redirect base
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_BETTER_AUTH_URL" type="string" required>
+  The base URL for Better Auth as seen from the browser. Exposed to client-side JavaScript.
+  
+  **Scope:** Client-side (exposed to browser)
+  
+  **Default:** `http://localhost:3000`
+  
+  **Production example:**
+  ```
+  https://yourdomain.com
+  ```
+  
+  <Note>
+    In most cases, `BETTER_AUTH_URL` and `NEXT_PUBLIC_BETTER_AUTH_URL` will be identical. They're separate to support advanced scenarios like internal vs. external routing.
+  </Note>
+  
+  Used in:
+  - `src/lib/auth-client.ts:5` - Client-side auth SDK configuration
+</ParamField>
+
+### Google OAuth
+
+To enable Google sign-in, you need OAuth 2.0 credentials from Google Cloud Console.
+
+<ParamField path="GOOGLE_CLIENT_ID" type="string" required>
+  OAuth 2.0 Client ID from Google Cloud Console.
+  
+  **Scope:** Server-side only
+  
+  **Default:** `your-google-client-id`
+  
+  **How to get:**
+  1. Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+  2. Create OAuth 2.0 Client ID credentials
+  3. Set authorized redirect URI to: `{BETTER_AUTH_URL}/api/auth/callback/google`
+  
+  See the [Google OAuth Setup](/configuration/google-oauth) guide for detailed instructions.
+  
+  Used in:
+  - `src/lib/auth.ts:15` - Google OAuth provider configuration
+</ParamField>
+
+<ParamField path="GOOGLE_CLIENT_SECRET" type="string" required>
+  OAuth 2.0 Client Secret from Google Cloud Console.
+  
+  **Scope:** Server-side only
+  
+  **Default:** `your-google-client-secret`
+  
+  <Warning>
+    Keep this secret secure. Never expose it in client-side code or commit it to version control.
+  </Warning>
+  
+  Used in:
+  - `src/lib/auth.ts:16` - Google OAuth provider configuration
+</ParamField>
+
+### Backend API (Optional)
+
+If you're integrating with an external backend service, configure these variables. If not set, backend-related features are disabled.
+
+<ParamField path="BACKEND_API_URL" type="string" optional>
+  The URL of your backend API service as accessed from the Next.js server. Used by the API proxy route.
+  
+  **Scope:** Server-side only (NOT exposed to browser)
+  
+  **Default:** `http://localhost:8080`
+  
+  **Purpose:** The API proxy at `/api/[...path]` forwards requests to this URL with automatic JWT injection.
+  
+  <Note>
+    This variable is commented out by default. Uncomment it if you have an external backend.
+  </Note>
+  
+  Used in:
+  - `src/app/api/[...path]/route.ts:35` - API proxy backend target
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_BACKEND_API_URL" type="string" optional>
+  The URL of your backend API service as accessed from the browser. Used by client-side API clients.
+  
+  **Scope:** Client-side (exposed to browser)
+  
+  **Default:** `http://localhost:8080`
+  
+  **Purpose:** The fetch and Axios API clients use this URL for direct browser-to-backend requests.
+  
+  <Note>
+    If using the API proxy route, you may not need this variable. It's primarily for direct client-to-backend communication.
+  </Note>
+  
+  Used in:
+  - `src/lib/api-client.ts:28` - Fetch-based API client base URL
+  - `src/lib/api-client-axios.ts` - Axios API client base URL
+</ParamField>
+
+## Environment Variable Scopes
+
+Next.js distinguishes between server-side and client-side environment variables:
+
+| Prefix | Scope | Access |
+|--------|-------|--------|
+| None | Server-side only | Only accessible in Node.js runtime (API routes, server components) |
+| `NEXT_PUBLIC_` | Client-side | Exposed to the browser, included in JavaScript bundle |
+
+<Warning>
+  **Security Best Practice:** Never prefix sensitive variables like `DATABASE_URL`, `BETTER_AUTH_SECRET`, or `GOOGLE_CLIENT_SECRET` with `NEXT_PUBLIC_`. This would expose them to anyone viewing your site's JavaScript.
+</Warning>
+
+## Validation
+
+The application will fail at runtime if required environment variables are missing. You'll see errors like:
+
+```
+Error: Database connection failed - DATABASE_URL is not defined
+```
+
+To validate your configuration:
+
+1. **Check all required variables are set:**
+   ```bash
+   grep -v '^#' .env | grep -v '^$'
+   ```
+
+2. **Test database connection:**
+   ```bash
+   npm run db:push
+   ```
+
+3. **Start the dev server:**
+   ```bash
+   npm run dev
+   ```
+
+If everything is configured correctly, you should see:
+```
+✓ Ready on http://localhost:3000
+```
+
+## Production Considerations
+
+<Steps>
+  <Step title="Use environment variable management">
+    Store secrets in your hosting platform's environment variable system (Vercel, Railway, AWS, etc.) instead of `.env` files.
+  </Step>
+  
+  <Step title="Rotate secrets regularly">
+    Change `BETTER_AUTH_SECRET` and OAuth credentials periodically, especially if team members leave.
+  </Step>
+  
+  <Step title="Use HTTPS everywhere">
+    Set `BETTER_AUTH_URL` and `NEXT_PUBLIC_BETTER_AUTH_URL` to `https://` URLs in production. OAuth providers require HTTPS for redirect URIs.
+  </Step>
+  
+  <Step title="Restrict database access">
+    Use connection strings that point to private database instances, not publicly accessible ones.
+  </Step>
+</Steps>
+
+## Related Documentation
+
+- [Database Configuration](/configuration/database) - PostgreSQL setup and connection troubleshooting
+- [Google OAuth Setup](/configuration/google-oauth) - Step-by-step Google Cloud Console configuration

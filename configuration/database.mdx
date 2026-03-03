@@ -1,0 +1,518 @@
+---
+title: Database Configuration
+description: PostgreSQL setup, connection configuration, and database schema reference
+---
+
+The Auth UI Boilerplate uses PostgreSQL as its database, managed through [Drizzle ORM](https://orm.drizzle.team/). This guide covers database setup, connection configuration, schema structure, and troubleshooting.
+
+## Database Requirements
+
+The application requires:
+- **PostgreSQL 12 or higher** (PostgreSQL 18 recommended)
+- A database with connection credentials
+- Network access from your application to the database
+
+## Setup Options
+
+You can set up PostgreSQL in two ways:
+
+### Option 1: Dev Container (Recommended)
+
+The Dev Container setup includes PostgreSQL 18 automatically configured and ready to use.
+
+<Steps>
+  <Step title="Install Prerequisites">
+    - [Visual Studio Code](https://code.visualstudio.com/)
+    - [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
+    - [Docker Desktop](https://www.docker.com/products/docker-desktop)
+  </Step>
+  
+  <Step title="Open in Dev Container">
+    1. Open the project in VS Code
+    2. Press `Cmd+Shift+P` (Mac) or `Ctrl+Shift+P` (Windows/Linux)
+    3. Select **"Dev Containers: Reopen in Container"**
+    4. Wait for the container to build (first time takes a few minutes)
+  </Step>
+  
+  <Step title="Verify Connection">
+    The default `.env.example` includes the correct connection string for the Dev Container:
+    
+    ```bash
+    DATABASE_URL=postgresql://postgres:postgres@postgres:5432/postgres
+    ```
+    
+    No changes needed - this works out of the box!
+  </Step>
+</Steps>
+
+### Option 2: Manual PostgreSQL Installation
+
+If you prefer to run PostgreSQL locally without Docker:
+
+<Steps>
+  <Step title="Install PostgreSQL">
+    **macOS (Homebrew):**
+    ```bash
+    brew install postgresql@18
+    brew services start postgresql@18
+    ```
+    
+    **Ubuntu/Debian:**
+    ```bash
+    sudo apt update
+    sudo apt install postgresql postgresql-contrib
+    sudo systemctl start postgresql
+    ```
+    
+    **Windows:**
+    Download the installer from [postgresql.org/download/windows](https://www.postgresql.org/download/windows/)
+  </Step>
+  
+  <Step title="Create Database and User">
+    Connect to PostgreSQL and create a database:
+    
+    ```bash
+    psql postgres
+    ```
+    
+    Run these SQL commands:
+    
+    ```sql
+    CREATE DATABASE myapp;
+    CREATE USER myapp_user WITH PASSWORD 'secure_password';
+    GRANT ALL PRIVILEGES ON DATABASE myapp TO myapp_user;
+    ```
+    
+    <Note>
+      Replace `myapp`, `myapp_user`, and `secure_password` with your preferred values.
+    </Note>
+  </Step>
+  
+  <Step title="Update DATABASE_URL">
+    Update your `.env` file with your connection details:
+    
+    ```bash
+    DATABASE_URL=postgresql://myapp_user:secure_password@localhost:5432/myapp
+    ```
+  </Step>
+</Steps>
+
+## Connection String Format
+
+The `DATABASE_URL` environment variable uses the standard PostgreSQL connection string format:
+
+```
+postgresql://[username]:[password]@[host]:[port]/[database]
+```
+
+**Components:**
+
+| Component | Description | Example |
+|-----------|-------------|---------|
+| `username` | Database user | `postgres`, `myapp_user` |
+| `password` | User password | `postgres`, `secure_password` |
+| `host` | Database server hostname or IP | `localhost`, `postgres`, `db.example.com` |
+| `port` | PostgreSQL port (default: 5432) | `5432` |
+| `database` | Database name | `postgres`, `myapp` |
+
+**Example configurations:**
+
+```bash
+# Dev Container (default)
+DATABASE_URL=postgresql://postgres:postgres@postgres:5432/postgres
+
+# Local PostgreSQL
+DATABASE_URL=postgresql://myapp:mypassword@localhost:5432/myapp
+
+# Remote database
+DATABASE_URL=postgresql://user:pass@db.example.com:5432/production
+
+# With SSL (production)
+DATABASE_URL=postgresql://user:pass@db.example.com:5432/production?sslmode=require
+```
+
+<Warning>
+  Keep your `DATABASE_URL` secret. It contains database credentials and should never be committed to version control or exposed to the browser.
+</Warning>
+
+## Database Schema
+
+The database schema is defined in `src/db/schema.ts` using Drizzle ORM. Better Auth automatically manages five tables:
+
+### Tables Overview
+
+| Table | Purpose |
+|-------|----------|
+| `user` | User profiles and account information |
+| `session` | Active authentication sessions |
+| `account` | OAuth provider links and credentials |
+| `verification` | Email verification tokens |
+| `jwks` | JSON Web Key Sets for JWT signing |
+
+### User Table
+
+Stores core user profile information:
+
+```typescript src/db/schema.ts
+export const user = pgTable("user", {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  emailVerified: boolean('email_verified').$defaultFn(() => false).notNull(),
+  image: text('image'),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()).notNull(),
+  updatedAt: timestamp('updated_at').$defaultFn(() => new Date()).notNull()
+});
+```
+
+**Columns:**
+- `id` - Unique user identifier (text UUID)
+- `name` - User's display name
+- `email` - Email address (unique)
+- `emailVerified` - Whether email has been verified (boolean)
+- `image` - Profile picture URL (from OAuth providers)
+- `createdAt` - Account creation timestamp
+- `updatedAt` - Last update timestamp
+
+### Session Table
+
+Tracks active user sessions:
+
+```typescript src/db/schema.ts
+export const session = pgTable("session", {
+  id: text('id').primaryKey(),
+  expiresAt: timestamp('expires_at').notNull(),
+  token: text('token').notNull().unique(),
+  createdAt: timestamp('created_at').notNull(),
+  updatedAt: timestamp('updated_at').notNull(),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' })
+});
+```
+
+**Columns:**
+- `id` - Session identifier
+- `expiresAt` - When the session expires
+- `token` - Session token (unique, used in cookies)
+- `ipAddress` - IP address of the client
+- `userAgent` - Browser user agent string
+- `userId` - Foreign key to `user` table (cascading delete)
+
+### Account Table
+
+Links OAuth provider accounts to users:
+
+```typescript src/db/schema.ts
+export const account = pgTable("account", {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  providerId: text('provider_id').notNull(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  accessToken: text('access_token'),
+  refreshToken: text('refresh_token'),
+  idToken: text('id_token'),
+  accessTokenExpiresAt: timestamp('access_token_expires_at'),
+  refreshTokenExpiresAt: timestamp('refresh_token_expires_at'),
+  scope: text('scope'),
+  password: text('password'),
+  createdAt: timestamp('created_at').notNull(),
+  updatedAt: timestamp('updated_at').notNull()
+});
+```
+
+**Columns:**
+- `id` - Account record identifier
+- `accountId` - Provider-specific user ID (e.g., Google user ID)
+- `providerId` - Provider name ("google", "github", "email", etc.)
+- `userId` - Foreign key to `user` table
+- `accessToken` - OAuth access token (for API calls)
+- `refreshToken` - OAuth refresh token (for renewing access)
+- `idToken` - OAuth ID token (JWT with user claims)
+- `password` - Hashed password (for email/password auth)
+- `scope` - OAuth scopes granted
+
+### Verification Table
+
+Stores temporary verification tokens:
+
+```typescript src/db/schema.ts
+export const verification = pgTable("verification", {
+  id: text('id').primaryKey(),
+  identifier: text('identifier').notNull(),
+  value: text('value').notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()),
+  updatedAt: timestamp('updated_at').$defaultFn(() => new Date())
+});
+```
+
+**Purpose:** Email verification, password reset tokens, and other temporary codes.
+
+### JWKS Table
+
+Stores cryptographic keys for JWT signing:
+
+```typescript src/db/schema.ts
+export const jwks = pgTable("jwks", {
+  id: text('id').primaryKey(),
+  publicKey: text('public_key').notNull(),
+  privateKey: text('private_key').notNull(),
+  createdAt: timestamp('created_at').notNull()
+});
+```
+
+**Purpose:** Better Auth uses Ed25519 key pairs to sign JWTs. The public key is exposed at `/api/auth/jwks` for backend services to verify tokens.
+
+## Database Operations
+
+The boilerplate includes several npm scripts for managing your database:
+
+```bash
+# Push schema changes to database (development - no migration files)
+npm run db:push
+
+# Generate migration files from schema changes
+npm run db:generate
+
+# Run pending migrations
+npm run db:migrate
+
+# Open Drizzle Studio (visual database browser)
+npm run db:studio
+```
+
+### Initial Setup
+
+After configuring your `DATABASE_URL`, push the schema to create all tables:
+
+```bash
+npm run db:push
+```
+
+You should see output like:
+```
+✓ Applying schema changes...
+✓ Tables created successfully
+```
+
+<Note>
+  `db:push` is great for development. For production, use `db:generate` and `db:migrate` to create proper migration files.
+</Note>
+
+### Adding Custom Tables
+
+To add your own tables to the schema:
+
+<Steps>
+  <Step title="Define the table in schema.ts">
+    ```typescript src/db/schema.ts
+    import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
+    
+    export const post = pgTable("post", {
+      id: text("id").primaryKey(),
+      title: text("title").notNull(),
+      content: text("content"),
+      userId: text("user_id")
+        .notNull()
+        .references(() => user.id, { onDelete: "cascade" }),
+      createdAt: timestamp("created_at").$defaultFn(() => new Date()).notNull(),
+    });
+    ```
+  </Step>
+  
+  <Step title="Push or migrate the changes">
+    **For development:**
+    ```bash
+    npm run db:push
+    ```
+    
+    **For production:**
+    ```bash
+    npm run db:generate  # Creates migration file
+    npm run db:migrate   # Applies migration
+    ```
+  </Step>
+  
+  <Step title="Query the table">
+    ```typescript
+    import { db } from "@/db";
+    import { post } from "@/db/schema";
+    
+    // Insert
+    await db.insert(post).values({
+      id: "123",
+      title: "My First Post",
+      content: "Hello world!",
+      userId: user.id,
+    });
+    
+    // Query
+    const posts = await db.select().from(post).where(eq(post.userId, user.id));
+    ```
+  </Step>
+</Steps>
+
+## Drizzle Configuration
+
+The database configuration is defined in `drizzle.config.ts`:
+
+```typescript drizzle.config.ts
+import { defineConfig } from "drizzle-kit";
+
+export default defineConfig({
+  schema: "./src/db/schema.ts",
+  out: "./src/db/migrations",
+  dialect: "postgresql",
+  dbCredentials: {
+    url: process.env.DATABASE_URL || "postgresql://localhost:5432/app",
+  },
+});
+```
+
+**Configuration:**
+- `schema` - Path to your schema definition
+- `out` - Where to store migration files
+- `dialect` - Database type ("postgresql")
+- `dbCredentials.url` - Connection string from environment
+
+## Connection Pool
+
+The database connection is established in `src/db/index.ts`:
+
+```typescript src/db/index.ts
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import * as schema from "./schema";
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL!
+});
+
+export const db = drizzle(pool, { schema });
+```
+
+The connection pool is created once and reused across requests for optimal performance.
+
+## Troubleshooting
+
+### "Connection refused" Error
+
+**Symptom:** Application crashes with `ECONNREFUSED` error.
+
+**Solutions:**
+- Verify PostgreSQL is running: `pg_isready` (manual install) or check Docker containers (Dev Container)
+- Check the `host` in your `DATABASE_URL` matches where PostgreSQL is running
+- For Dev Container, use `postgres` as the host, not `localhost`
+- For local PostgreSQL, use `localhost` or `127.0.0.1`
+
+### "Password authentication failed"
+
+**Symptom:** Database connection fails with authentication error.
+
+**Solutions:**
+- Double-check the username and password in `DATABASE_URL`
+- Ensure no extra spaces or special characters need URL encoding
+- For manual PostgreSQL, verify user exists: `psql -U postgres -c "\du"`
+
+### "Database does not exist"
+
+**Symptom:** Connection fails with database not found error.
+
+**Solutions:**
+- Create the database: `createdb myapp` or use SQL: `CREATE DATABASE myapp;`
+- Verify the database name in `DATABASE_URL` matches the actual database
+
+### Tables Not Created
+
+**Symptom:** `npm run db:push` succeeds but tables aren't visible.
+
+**Solutions:**
+- Check that `DATABASE_URL` points to the correct database
+- View tables with: `psql $DATABASE_URL -c "\dt"`
+- Verify the schema file has no syntax errors
+
+### "SSL Connection Required"
+
+**Symptom:** Production database requires SSL but connection fails.
+
+**Solution:**
+Add `sslmode=require` to your connection string:
+
+```bash
+DATABASE_URL=postgresql://user:pass@host:5432/db?sslmode=require
+```
+
+### Viewing Database Contents
+
+**Option 1: Drizzle Studio (Recommended)**
+```bash
+npm run db:studio
+```
+Opens a web-based database browser at `https://local.drizzle.studio`
+
+**Option 2: psql CLI**
+```bash
+psql $DATABASE_URL
+
+# List tables
+\dt
+
+# Query users
+SELECT * FROM "user" LIMIT 10;
+
+# Exit
+\q
+```
+
+**Option 3: pgAdmin, TablePlus, or DBeaver**
+
+Use any PostgreSQL GUI client and connect with your `DATABASE_URL` credentials.
+
+## Production Considerations
+
+<Warning>
+  Production databases require additional configuration for security and performance.
+</Warning>
+
+### Connection Pooling
+
+For serverless environments (Vercel, AWS Lambda), use connection pooling:
+
+```bash
+# Use PgBouncer or a pooling service like Supabase Pooler
+DATABASE_URL=postgresql://user:pass@pooler.example.com:5432/db?pgbouncer=true
+```
+
+### SSL/TLS
+
+Always use SSL for production databases:
+
+```bash
+DATABASE_URL=postgresql://user:pass@host:5432/db?sslmode=require
+```
+
+### Backups
+
+Set up automated backups:
+- Most managed PostgreSQL services (AWS RDS, Google Cloud SQL, Supabase) include automatic backups
+- For self-hosted, use `pg_dump` with cron jobs
+
+### Migrations
+
+Use migrations instead of `db:push` in production:
+
+```bash
+# Generate migration after schema changes
+npm run db:generate
+
+# Review the generated SQL in src/db/migrations/
+
+# Apply to production
+DATABASE_URL=<production-url> npm run db:migrate
+```
+
+## Related Documentation
+
+- [Environment Variables](/configuration/environment-variables) - `DATABASE_URL` configuration reference
+- [Google OAuth Setup](/configuration/google-oauth) - Understanding the account linking tables

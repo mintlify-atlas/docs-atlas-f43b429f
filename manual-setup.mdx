@@ -1,0 +1,423 @@
+---
+title: Manual Setup
+description: Install Auth UI Boilerplate without Dev Container on any system
+---
+
+## Overview
+
+If you prefer not to use Dev Containers, or if you're working on a system without Docker, you can set up the Auth UI Boilerplate manually. This guide covers installation on macOS, Linux, and Windows.
+
+<Note>
+  The Dev Container setup is recommended for most users as it ensures a consistent environment. Only use manual setup if you have specific requirements or cannot use Docker.
+</Note>
+
+## Prerequisites
+
+Before you begin, ensure you have the following installed on your system:
+
+<CardGroup cols={2}>
+  <Card title="Node.js 22+" icon="node-js" href="https://nodejs.org/">
+    JavaScript runtime (LTS version recommended)
+  </Card>
+  <Card title="PostgreSQL" icon="database" href="https://www.postgresql.org/download/">
+    Relational database (version 14+ recommended)
+  </Card>
+  <Card title="Git" icon="git" href="https://git-scm.com/">
+    Version control system
+  </Card>
+  <Card title="npm or pnpm" icon="box">
+    Package manager (included with Node.js)
+  </Card>
+</CardGroup>
+
+### Verify Prerequisites
+
+Confirm that you have the required versions installed:
+
+```bash
+node --version  # Should be v22.0.0 or higher
+npm --version   # Should be v10.0.0 or higher
+psql --version  # Should be 14.x or higher
+```
+
+<Warning>
+  Node.js 22+ is **required** for this boilerplate. Earlier versions may not support the latest Next.js 16 and React 19 features.
+</Warning>
+
+## Installation Steps
+
+<Steps>
+  <Step title="Clone the Repository">
+    Clone the Auth UI Boilerplate repository:
+
+    ```bash
+    git clone https://github.com/your-org/auth-ui-boilerplate.git
+    cd auth-ui-boilerplate
+    ```
+  </Step>
+
+  <Step title="Set Up PostgreSQL Database">
+    Create a new PostgreSQL database for the application.
+
+    ### Option 1: Using psql (Command Line)
+
+    ```bash
+    # Connect to PostgreSQL as the postgres user
+    psql -U postgres
+
+    # Create a new database
+    CREATE DATABASE auth_boilerplate;
+
+    # Create a user (optional - for better security)
+    CREATE USER auth_user WITH PASSWORD 'your-secure-password';
+
+    # Grant privileges
+    GRANT ALL PRIVILEGES ON DATABASE auth_boilerplate TO auth_user;
+
+    # Exit psql
+    \q
+    ```
+
+    ### Option 2: Using pgAdmin (GUI)
+
+    1. Open pgAdmin and connect to your PostgreSQL server
+    2. Right-click **Databases** → **Create** → **Database**
+    3. Name: `auth_boilerplate`
+    4. Owner: `postgres` (or create a dedicated user)
+    5. Click **Save**
+
+    ### Option 3: Using Docker (Standalone PostgreSQL)
+
+    If you have Docker but don't want the full Dev Container:
+
+    ```bash
+    docker run --name auth-postgres \
+      -e POSTGRES_PASSWORD=postgres \
+      -e POSTGRES_DB=auth_boilerplate \
+      -p 5432:5432 \
+      -d postgres:18
+    ```
+
+    <Note>
+      The database name doesn't have to be `auth_boilerplate` — use whatever name you prefer, and update `DATABASE_URL` accordingly.
+    </Note>
+  </Step>
+
+  <Step title="Configure Environment Variables">
+    Copy the example environment file:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    Open `.env` in your editor and update the `DATABASE_URL` to match your local PostgreSQL configuration:
+
+    ```bash .env
+    # Update this to match your local PostgreSQL setup
+    DATABASE_URL=postgresql://postgres:postgres@localhost:5432/auth_boilerplate
+
+    # Or if you created a dedicated user:
+    # DATABASE_URL=postgresql://auth_user:your-secure-password@localhost:5432/auth_boilerplate
+
+    # Generate a secret: openssl rand -base64 32
+    BETTER_AUTH_SECRET=change-me-to-a-random-secret
+
+    # Auth URLs (keep as localhost for local dev)
+    BETTER_AUTH_URL=http://localhost:3000
+    NEXT_PUBLIC_BETTER_AUTH_URL=http://localhost:3000
+
+    # Google OAuth (get from Google Cloud Console)
+    GOOGLE_CLIENT_ID=your-google-client-id
+    GOOGLE_CLIENT_SECRET=your-google-client-secret
+
+    # Optional: Backend API URLs
+    # BACKEND_API_URL=http://localhost:8080
+    # NEXT_PUBLIC_BACKEND_API_URL=http://localhost:8080
+    ```
+
+    ### Generate Better Auth Secret
+
+    Use OpenSSL to generate a secure random secret:
+
+    ```bash
+    openssl rand -base64 32
+    ```
+
+    Copy the output and replace `BETTER_AUTH_SECRET` in `.env`.
+
+    ### Set Up Google OAuth (Optional)
+
+    To enable Google sign-in:
+
+    1. Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+    2. Create OAuth 2.0 credentials (see [Quickstart guide](/quickstart) for detailed steps)
+    3. Set redirect URI to `http://localhost:3000/api/auth/callback/google`
+    4. Copy Client ID and Secret to `.env`
+
+    <Note>
+      Google OAuth is optional. You can use email/password authentication without it.
+    </Note>
+  </Step>
+
+  <Step title="Install Dependencies">
+    Install all required npm packages:
+
+    <CodeGroup>
+    ```bash npm
+    npm install
+    ```
+
+    ```bash pnpm
+    pnpm install
+    ```
+
+    ```bash yarn
+    yarn install
+    ```
+    </CodeGroup>
+
+    This installs all dependencies defined in `package.json`, including:
+
+    - **next** (v16.1.6) — React framework
+    - **better-auth** (v1.4.18) — Authentication library
+    - **drizzle-orm** (v0.45.1) — Database ORM
+    - **pg** (v8.18.0) — PostgreSQL client
+    - **axios** (v1.13.5) — HTTP client
+    - **tailwindcss** (v4) — CSS framework
+    - **lucide-react** — Icon library
+  </Step>
+
+  <Step title="Push Database Schema">
+    Create the required database tables:
+
+    ```bash
+    npm run db:push
+    ```
+
+    This runs `drizzle-kit push`, which:
+    - Connects to your PostgreSQL database using `DATABASE_URL`
+    - Reads the schema from `src/db/schema.ts`
+    - Creates tables: `user`, `session`, `account`, `verification`, `jwks`
+
+    You should see output like:
+
+    ```bash
+    Reading config from drizzle.config.ts
+    Using 'pg' driver for database querying
+    Pushing schema to database...
+    ✓ Schema pushed successfully!
+    ```
+
+    ### Verify Tables
+
+    Check that the tables were created:
+
+    ```bash
+    psql -U postgres -d auth_boilerplate -c "\dt"
+    ```
+
+    Expected output:
+
+    ```
+             List of relations
+     Schema |     Name     | Type  |  Owner
+    --------+--------------+-------+----------
+     public | account      | table | postgres
+     public | jwks         | table | postgres
+     public | session      | table | postgres
+     public | user         | table | postgres
+     public | verification | table | postgres
+    ```
+  </Step>
+
+  <Step title="Start the Development Server">
+    Run the Next.js development server:
+
+    ```bash
+    npm run dev
+    ```
+
+    The application will start on [http://localhost:3000](http://localhost:3000).
+
+    Expected output:
+
+    ```bash
+    ▲ Next.js 16.1.6
+    - Local:        http://localhost:3000
+    - Environments: .env
+
+    ✓ Starting...
+    ✓ Ready in 1.5s
+    ```
+
+    <Note>
+      The first start may take longer as Next.js compiles the application. Subsequent starts will be faster.
+    </Note>
+  </Step>
+
+  <Step title="Verify Installation">
+    Open your browser and navigate to [http://localhost:3000](http://localhost:3000).
+
+    You should see the Auth UI Boilerplate home page with:
+    - Navigation bar with **Sign In** and **Sign Up** buttons
+    - "How It Works" section
+    - Backend integration guides
+    - Theme toggle (light/dark mode)
+
+    ### Test Authentication
+
+    1. Click **Sign Up** and create an account with email/password
+    2. After signup, you should be automatically signed in
+    3. Verify your session appears in the "Authentication Status" card
+    4. Test sign out and sign in again
+
+    ### Test Google OAuth (if configured)
+
+    1. Click **Sign In**
+    2. Click **Sign in with Google**
+    3. Complete the OAuth flow
+    4. Verify you're redirected back and authenticated
+  </Step>
+</Steps>
+
+## Database Management Commands
+
+The boilerplate includes several Drizzle commands for managing your database:
+
+| Command | Description |
+|---------|-------------|
+| `npm run db:push` | Push schema changes directly to database (dev only) |
+| `npm run db:generate` | Generate SQL migration files from schema changes |
+| `npm run db:migrate` | Apply pending migrations to the database |
+| `npm run db:studio` | Open Drizzle Studio (visual database browser) |
+
+### Drizzle Studio
+
+To visually browse and edit your database:
+
+```bash
+npm run db:studio
+```
+
+This opens Drizzle Studio at [https://local.drizzle.studio](https://local.drizzle.studio), where you can:
+- View all tables and data
+- Edit records directly
+- Run queries
+- Inspect relationships
+
+<Warning>
+  Drizzle Studio is for **development only**. Do not expose it in production.
+</Warning>
+
+## Production Deployment
+
+For production deployments:
+
+1. **Use migrations instead of push**:
+   ```bash
+   npm run db:generate  # Generate migration files
+   npm run db:migrate   # Apply migrations in production
+   ```
+
+2. **Set environment variables** on your hosting platform:
+   - `DATABASE_URL` — Production PostgreSQL connection string
+   - `BETTER_AUTH_SECRET` — Strong random secret (32+ characters)
+   - `BETTER_AUTH_URL` — Production URL (e.g., `https://app.example.com`)
+   - `NEXT_PUBLIC_BETTER_AUTH_URL` — Same as `BETTER_AUTH_URL`
+   - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — Update redirect URI to production URL
+
+3. **Update Google OAuth redirect URI**:
+   ```
+   https://your-domain.com/api/auth/callback/google
+   ```
+
+4. **Build and start**:
+   ```bash
+   npm run build
+   npm run start
+   ```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Connection refused to PostgreSQL">
+    **Symptoms**: `Error: connect ECONNREFUSED 127.0.0.1:5432`
+
+    **Solutions**:
+    - Ensure PostgreSQL is running: `sudo service postgresql status` (Linux) or check Activity Monitor (macOS)
+    - Verify the port: PostgreSQL defaults to 5432, but check your config
+    - Check `DATABASE_URL` format: `postgresql://user:password@host:port/database`
+    - Try connecting with psql: `psql -U postgres -h localhost`
+  </Accordion>
+
+  <Accordion title="Authentication failed for user">
+    **Symptoms**: `error: password authentication failed for user "postgres"`
+
+    **Solutions**:
+    - Verify your PostgreSQL password is correct in `DATABASE_URL`
+    - Reset the postgres password:
+      ```bash
+      sudo -u postgres psql
+      ALTER USER postgres PASSWORD 'newpassword';
+      ```
+    - Update `.env` with the new password
+  </Accordion>
+
+  <Accordion title="Node.js version too old">
+    **Symptoms**: `Error: The engine "node" is incompatible with this module`
+
+    **Solutions**:
+    - Upgrade to Node.js 22+: Download from [nodejs.org](https://nodejs.org/)
+    - Or use nvm (Node Version Manager):
+      ```bash
+      nvm install 22
+      nvm use 22
+      ```
+    - Verify: `node --version`
+  </Accordion>
+
+  <Accordion title="Port 3000 already in use">
+    **Symptoms**: `Error: listen EADDRINUSE: address already in use :::3000`
+
+    **Solutions**:
+    - Find and kill the process using port 3000:
+      ```bash
+      # macOS/Linux
+      lsof -ti:3000 | xargs kill -9
+
+      # Windows
+      netstat -ano | findstr :3000
+      taskkill /PID <PID> /F
+      ```
+    - Or run on a different port:
+      ```bash
+      PORT=3001 npm run dev
+      ```
+  </Accordion>
+
+  <Accordion title="drizzle-kit command not found">
+    **Symptoms**: `bash: drizzle-kit: command not found`
+
+    **Solutions**:
+    - Run via npm script: `npm run db:push` (not `drizzle-kit push`)
+    - Or install globally: `npm install -g drizzle-kit`
+    - Verify installation: `npx drizzle-kit --version`
+  </Accordion>
+</AccordionGroup>
+
+## What's Next?
+
+<CardGroup cols={2}>
+  <Card title="Environment Variables" icon="gear" href="/configuration/environment-variables">
+    Detailed guide to all configuration options
+  </Card>
+  <Card title="Database Schema" icon="database" href="/database/schema">
+    Learn how to add custom tables with Drizzle
+  </Card>
+  <Card title="Backend Integration" icon="server" href="/backend/overview">
+    Connect Go, Python, or Node.js backends
+  </Card>
+  <Card title="Dev Container Setup" icon="docker" href="/development/dev-container">
+    Alternative setup using Dev Containers
+  </Card>
+</CardGroup>

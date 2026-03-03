@@ -1,80 +1,313 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get started with Auth UI Boilerplate using Dev Container in under 5 minutes
 ---
 
-## Get started in three steps
+## Prerequisites
 
-Get your documentation site running locally and make your first customization.
+Before you begin, ensure you have the following installed:
 
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+<CardGroup cols={3}>
+  <Card title="VS Code" icon="code" href="https://code.visualstudio.com/">
+    Microsoft's code editor
+  </Card>
+  <Card title="Dev Containers Extension" icon="box" href="https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers">
+    Run dev environments in containers
+  </Card>
+  <Card title="Docker" icon="docker" href="https://www.docker.com/get-started">
+    Container runtime
+  </Card>
 </CardGroup>
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  The Dev Container setup is the **recommended way** to get started. It automatically provisions Node.js (via Volta), Python (via pyenv), and PostgreSQL 18 in an isolated Ubuntu container.
 </Note>
+
+## Installation Steps
+
+<Steps>
+  <Step title="Clone the Repository">
+    Clone the Auth UI Boilerplate repository to your local machine:
+
+    ```bash
+    git clone https://github.com/your-org/auth-ui-boilerplate.git
+    cd auth-ui-boilerplate
+    ```
+
+    Open the project in VS Code:
+
+    ```bash
+    code .
+    ```
+  </Step>
+
+  <Step title="Open in Dev Container">
+    Once VS Code opens, you'll see a notification to "Reopen in Container".
+
+    Alternatively, manually trigger it:
+    - Press `Cmd+Shift+P` (Mac) or `Ctrl+Shift+P` (Windows/Linux)
+    - Type "Dev Containers: Reopen in Container"
+    - Select the command
+
+    <Note>
+      The first build takes 2-5 minutes as Docker downloads the base image and sets up PostgreSQL 18, Node.js, Python, and Zsh with plugins.
+    </Note>
+
+    The Dev Container configuration (`.devcontainer/devcontainer.json`) provides:
+    - **Ubuntu base** with common utilities
+    - **Volta** for Node.js version management
+    - **pyenv** for Python version management
+    - **PostgreSQL 18** running on `postgres:5432`
+    - **Zsh** with autosuggestions and syntax highlighting
+  </Step>
+
+  <Step title="Install Runtime Prerequisites">
+    Once inside the container, install Node.js and Python:
+
+    ```bash
+    volta install node
+    ```
+
+    This installs the Node.js version specified in `package.json` (Node.js 22+).
+
+    If you plan to use the Python backend examples, also install Python:
+
+    ```bash
+    pyenv install 3.12
+    pyenv global 3.12
+    ```
+
+    Verify installations:
+
+    ```bash
+    node --version  # Should show v22.x.x or higher
+    npm --version   # Should show v10.x.x or higher
+    python --version # Should show Python 3.12.x
+    ```
+  </Step>
+
+  <Step title="Configure Environment Variables">
+    Copy the example environment file:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    The `.env` file contains the following configuration:
+
+    ```bash .env
+    # Database (pre-configured for Dev Container PostgreSQL)
+    DATABASE_URL=postgresql://postgres:postgres@postgres:5432/postgres
+
+    # Better Auth Secret (generate with: openssl rand -base64 32)
+    BETTER_AUTH_SECRET=change-me-to-a-random-secret
+
+    # Better Auth URLs
+    BETTER_AUTH_URL=http://localhost:3000
+    NEXT_PUBLIC_BETTER_AUTH_URL=http://localhost:3000
+
+    # Google OAuth (REQUIRED - see setup below)
+    GOOGLE_CLIENT_ID=your-google-client-id
+    GOOGLE_CLIENT_SECRET=your-google-client-secret
+
+    # Backend API (optional - only if you have an external backend)
+    # BACKEND_API_URL=http://localhost:8080
+    # NEXT_PUBLIC_BACKEND_API_URL=http://localhost:8080
+    ```
+
+    <Warning>
+      You **must** update `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to use Google OAuth. See the next section for setup instructions.
+    </Warning>
+
+    ### Generate Better Auth Secret
+
+    Generate a secure random secret for signing tokens:
+
+    ```bash
+    openssl rand -base64 32
+    ```
+
+    Replace `BETTER_AUTH_SECRET` in `.env` with the generated value.
+  </Step>
+
+  <Step title="Set Up Google OAuth">
+    To enable Google sign-in, you need OAuth credentials from Google Cloud:
+
+    1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+    2. Create a new project (or select an existing one)
+    3. Navigate to **APIs & Services > Credentials**
+    4. Click **Create Credentials > OAuth 2.0 Client ID**
+    5. Configure the OAuth consent screen if prompted
+    6. Select **Application type: Web application**
+    7. Add **Authorized redirect URI**:
+       ```
+       http://localhost:3000/api/auth/callback/google
+       ```
+    8. Click **Create** and copy the **Client ID** and **Client Secret**
+    9. Paste them into your `.env` file:
+
+    ```bash .env
+    GOOGLE_CLIENT_ID=123456789-abcdefg.apps.googleusercontent.com
+    GOOGLE_CLIENT_SECRET=GOCSPX-your-secret-here
+    ```
+
+    <Note>
+      If you don't want to use Google OAuth during development, you can skip this step and use email/password authentication instead. However, the Google sign-in button will not work.
+    </Note>
+  </Step>
+
+  <Step title="Install Dependencies">
+    Install all npm packages:
+
+    ```bash
+    npm install
+    ```
+
+    This installs:
+    - **Next.js 16** (React 19)
+    - **Better Auth** (authentication library)
+    - **Drizzle ORM** (database toolkit)
+    - **shadcn/ui** components (Tailwind CSS)
+    - **Axios** (HTTP client)
+    - **Motion** (animations)
+  </Step>
+
+  <Step title="Push Database Schema">
+    Create the required database tables in PostgreSQL:
+
+    ```bash
+    npm run db:push
+    ```
+
+    This command runs `drizzle-kit push`, which:
+    - Reads the schema from `src/db/schema.ts`
+    - Creates tables: `user`, `session`, `account`, `verification`, `jwks`
+    - Does **not** generate migration files (for quick dev iteration)
+
+    <Note>
+      `db:push` is recommended for development. For production, use `npm run db:generate` to create migration files, then `npm run db:migrate` to apply them.
+    </Note>
+
+    ### Database Schema
+
+    The following tables are created automatically by Better Auth:
+
+    | Table | Description |
+    |-------|-------------|
+    | `user` | User accounts (id, name, email, image, timestamps) |
+    | `session` | Active sessions with tokens and expiration |
+    | `account` | OAuth provider accounts (Google, GitHub, etc.) |
+    | `verification` | Email verification tokens |
+    | `jwks` | JSON Web Key Set for JWT signing/verification |
+  </Step>
+
+  <Step title="Start the Development Server">
+    Run the Next.js dev server:
+
+    ```bash
+    npm run dev
+    ```
+
+    The application will start on [http://localhost:3000](http://localhost:3000).
+
+    You should see output similar to:
+
+    ```bash
+    ▲ Next.js 16.1.6
+    - Local:        http://localhost:3000
+    - Environments: .env
+
+    ✓ Starting...
+    ✓ Ready in 1.2s
+    ```
+  </Step>
+
+  <Step title="Test Authentication">
+    Open your browser and navigate to [http://localhost:3000](http://localhost:3000).
+
+    ### Sign Up with Email
+
+    1. Click **Sign Up** in the navigation
+    2. Enter your email and password
+    3. Click **Create Account**
+    4. You'll be redirected to the home page, now authenticated
+
+    ### Sign In with Google
+
+    1. Click **Sign In** in the navigation
+    2. Click **Sign in with Google**
+    3. Complete the Google OAuth flow
+    4. You'll be redirected back to the application
+
+    ### Verify Session
+
+    After signing in, you should see:
+    - Your name and email displayed in the "Authentication Status" card
+    - A **Sign Out** button
+    - Access to protected features
+
+    <Note>
+      The home page includes an **API Test** section for testing backend integration. This requires setting `BACKEND_API_URL` and running a backend service. See the [Backend Integration](/backend/overview) guide for details.
+    </Note>
+  </Step>
+</Steps>
+
+## What's Next?
+
+<CardGroup cols={2}>
+  <Card title="Environment Variables" icon="gear" href="/configuration/environment-variables">
+    Learn about all available configuration options
+  </Card>
+  <Card title="Database Management" icon="database" href="/database/schema">
+    Add custom tables and run migrations with Drizzle
+  </Card>
+  <Card title="Backend Integration" icon="server" href="/backend/overview">
+    Connect Go, Python, or Express.js backends
+  </Card>
+  <Card title="Customize UI" icon="palette" href="/development/customization">
+    Remove demo components and build your app
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Dev Container fails to build">
+    **Solution**: Ensure Docker is running and you have the Dev Containers extension installed. Check Docker Desktop for error logs.
+
+    ```bash
+    # Rebuild the container from scratch
+    Cmd+Shift+P → "Dev Containers: Rebuild Container"
+    ```
+  </Accordion>
+
+  <Accordion title="Database connection fails">
+    **Solution**: The Dev Container PostgreSQL service may not have started. Check the logs:
+
+    ```bash
+    docker compose -f .devcontainer/docker-compose.yml logs postgres
+    ```
+
+    Restart the container if needed.
+  </Accordion>
+
+  <Accordion title="Google OAuth returns 'redirect_uri_mismatch'">
+    **Solution**: Ensure your redirect URI in Google Cloud Console exactly matches:
+
+    ```
+    http://localhost:3000/api/auth/callback/google
+    ```
+
+    No trailing slashes, correct port, and `http` (not `https`) for local dev.
+  </Accordion>
+
+  <Accordion title="npm run dev shows 'BETTER_AUTH_SECRET is not set'">
+    **Solution**: Make sure you copied `.env.example` to `.env` and generated a secret:
+
+    ```bash
+    openssl rand -base64 32
+    ```
+
+    Paste the result into `BETTER_AUTH_SECRET` in your `.env` file.
+  </Accordion>
+</AccordionGroup>

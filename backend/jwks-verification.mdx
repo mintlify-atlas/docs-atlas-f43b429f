@@ -1,0 +1,344 @@
+---
+title: JWKS Verification
+description: Understand how JWKS (JSON Web Key Set) works and how to verify JWT tokens
+---
+
+JWKS (JSON Web Key Set) is a standardized way to expose public keys that can be used to verify JWT signatures. Better Auth automatically generates and rotates signing keys, exposing them via the JWKS endpoint.
+
+## What is JWKS?
+
+JWKS is defined in [RFC 7517](https://tools.ietf.org/html/rfc7517) as a JSON structure representing a set of cryptographic keys. It allows your backend to fetch public keys dynamically without requiring shared secrets or manual key distribution.
+
+### JWKS Endpoint
+
+Better Auth exposes public keys at:
+
+```
+{BETTER_AUTH_URL}/api/auth/jwks
+```
+
+For local development, this is typically:
+
+```
+http://localhost:3000/api/auth/jwks
+```
+
+### Example JWKS Response
+
+```json
+{
+  "keys": [
+    {
+      "kty": "OKP",
+      "use": "sig",
+      "kid": "abc123def456",
+      "alg": "EdDSA",
+      "crv": "Ed25519",
+      "x": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"
+    }
+  ]
+}
+```
+
+### Key Fields
+
+| Field | Description |
+|-------|-------------|
+| `kty` | Key type (`OKP` for Edwards-curve, `RSA` for RSA) |
+| `use` | Intended use (`sig` for signature verification) |
+| `kid` | Key ID (used to match against JWT header) |
+| `alg` | Algorithm (`EdDSA` for Ed25519, `RS256` for RSA) |
+| `crv` | Curve name (for elliptic curve keys like Ed25519) |
+| `x` | Public key (base64url encoded) |
+
+<Note>
+Better Auth uses **Ed25519** by default, which is a modern, fast, and secure elliptic curve signature algorithm. It provides better security than RSA-2048 with smaller key sizes.
+</Note>
+
+## How JWT Verification Works
+
+When your backend receives a JWT, it follows these steps to verify it:
+
+<Steps>
+  <Step title="Extract the Key ID">
+    The JWT header contains a `kid` (Key ID) field that identifies which key was used to sign the token.
+    
+    ```json
+    // JWT Header
+    {
+      "alg": "EdDSA",
+      "typ": "JWT",
+      "kid": "abc123def456"
+    }
+    ```
+  </Step>
+  
+  <Step title="Fetch JWKS Keys">
+    Your backend fetches the JWKS from the Better Auth endpoint (or uses cached keys).
+  </Step>
+  
+  <Step title="Find Matching Key">
+    Find the key in the JWKS where `kid` matches the JWT header's `kid`.
+  </Step>
+  
+  <Step title="Verify Signature">
+    Use the public key to verify the JWT signature. If verification succeeds, the token is authentic and hasn't been tampered with.
+  </Step>
+  
+  <Step title="Validate Claims">
+    Check the `iss`, `aud`, `exp`, and other claims to ensure the token is valid for your service.
+  </Step>
+</Steps>
+
+## Database Storage
+
+Better Auth stores JWKS keys in the database in the `jwks` table:
+
+```typescript
+export const jwks = pgTable("jwks", {
+  id: text('id').primaryKey(),
+  publicKey: text('public_key').notNull(),
+  privateKey: text('private_key').notNull(),
+  createdAt: timestamp('created_at').notNull()
+});
+```
+
+<Warning>
+The `privateKey` field is never exposed via the JWKS endpoint. Only public keys are shared with your backend.
+</Warning>
+
+## Key Rotation
+
+Key rotation is an important security practice that limits the impact of a compromised signing key. Better Auth supports automatic key rotation.
+
+### How Key Rotation Works
+
+<Steps>
+  <Step title="New Key Generated">
+    Better Auth generates a new signing key pair (public + private).
+  </Step>
+  
+  <Step title="Both Keys Active">
+    The new key is added to the JWKS endpoint alongside the old key. New JWTs are signed with the new key, but the old key remains valid for verification.
+    
+    ```json
+    {
+      "keys": [
+        {
+          "kid": "new-key-id",
+          "kty": "OKP",
+          "alg": "EdDSA",
+          // ... new key
+        },
+        {
+          "kid": "old-key-id",
+          "kty": "OKP",
+          "alg": "EdDSA",
+          // ... old key (still valid)
+        }
+      ]
+    }
+    ```
+  </Step>
+  
+  <Step title="Old Key Deprecation">
+    After a grace period (typically long enough for all old tokens to expire), the old key is removed from the JWKS endpoint.
+  </Step>
+</Steps>
+
+### Why Key Rotation Matters
+
+<CardGroup cols={2}>
+  <Card title="Limit Exposure" icon="shield">
+    If a key is compromised, rotation limits the window of vulnerability.
+  </Card>
+  
+  <Card title="Zero Downtime" icon="clock">
+    Your backend doesn't need to be updated. It automatically picks up new keys from the JWKS endpoint.
+  </Card>
+  
+  <Card title="Compliance" icon="check">
+    Many security standards (PCI-DSS, HIPAA) require periodic key rotation.
+  </Card>
+  
+  <Card title="Defense in Depth" icon="lock">
+    Regular rotation is a best practice that adds an extra layer of security.
+  </Card>
+</CardGroup>
+
+## Caching Strategies
+
+Fetching JWKS keys on every request is inefficient and can introduce latency. Implement smart caching:
+
+### Time-Based Caching
+
+Cache JWKS keys with a reasonable TTL (e.g., 1 hour):
+
+```typescript
+let cachedKeys = null
+let cacheExpiry = 0
+
+async function getJWKS() {
+  const now = Date.now()
+  
+  if (cachedKeys && now < cacheExpiry) {
+    return cachedKeys
+  }
+  
+  const response = await fetch("http://localhost:3000/api/auth/jwks")
+  cachedKeys = await response.json()
+  cacheExpiry = now + 3600000 // 1 hour
+  
+  return cachedKeys
+}
+```
+
+### Error-Based Refresh
+
+If verification fails with "unknown key ID", refresh the JWKS cache:
+
+```typescript
+async function verifyToken(token: string) {
+  let keys = await getJWKS()
+  
+  try {
+    return await jwtVerify(token, keys)
+  } catch (error) {
+    if (error.code === 'ERR_JWK_NOT_FOUND') {
+      // Key might have rotated, refresh cache
+      keys = await getJWKS(true) // force refresh
+      return await jwtVerify(token, keys)
+    }
+    throw error
+  }
+}
+```
+
+### Library-Based Caching
+
+Most JWKS libraries implement caching automatically:
+
+<CodeGroup>
+```typescript jose (Node.js)
+import { createRemoteJWKSet } from "jose"
+
+// Automatically caches and refreshes keys
+const JWKS = createRemoteJWKSet(
+  new URL("http://localhost:3000/api/auth/jwks")
+)
+```
+
+```go jwx (Go)
+import "github.com/lestrrat-go/jwx/v3/jwk"
+
+// Automatically caches keys
+keyset, err := jwk.Fetch(ctx, "http://localhost:3000/api/auth/jwks")
+```
+
+```python PyJWKClient (Python)
+from jwt import PyJWKClient
+
+# Caches keys with configurable TTL
+jwks_client = PyJWKClient(
+    "http://localhost:3000/api/auth/jwks",
+    cache_keys=True,
+    max_cached_keys=16
+)
+```
+</CodeGroup>
+
+## Testing JWKS Verification
+
+You can test the JWKS endpoint using curl:
+
+```bash
+curl http://localhost:3000/api/auth/jwks
+```
+
+Expected response:
+
+```json
+{
+  "keys": [
+    {
+      "kty": "OKP",
+      "use": "sig",
+      "kid": "...",
+      "alg": "EdDSA",
+      "crv": "Ed25519",
+      "x": "..."
+    }
+  ]
+}
+```
+
+## Common Issues
+
+### "Invalid signature" errors
+
+<AccordionGroup>
+  <Accordion title="Cause: Using wrong JWKS URL">
+    Ensure your backend is fetching keys from the correct Better Auth URL. Check that `BETTER_AUTH_URL` matches your auth server.
+    
+    ```typescript
+    // ❌ Wrong
+    const JWKS = createRemoteJWKSet(
+      new URL("http://localhost:8080/api/auth/jwks")
+    )
+    
+    // ✅ Correct
+    const JWKS = createRemoteJWKSet(
+      new URL(process.env.BETTER_AUTH_URL + "/api/auth/jwks")
+    )
+    ```
+  </Accordion>
+  
+  <Accordion title="Cause: Issuer/Audience mismatch">
+    Ensure your `iss` and `aud` validation matches the `BETTER_AUTH_URL`:
+    
+    ```typescript
+    await jwtVerify(token, JWKS, {
+      issuer: process.env.BETTER_AUTH_URL,
+      audience: process.env.BETTER_AUTH_URL,
+    })
+    ```
+  </Accordion>
+  
+  <Accordion title="Cause: Stale key cache after rotation">
+    If keys have rotated, clear your JWKS cache or wait for it to expire. Most libraries handle this automatically.
+  </Accordion>
+</AccordionGroup>
+
+### "Token expired" errors
+
+JWTs have a limited lifetime (default 1 hour). Ensure your frontend refreshes tokens before they expire:
+
+```typescript
+// api-client.ts handles this automatically
+private isTokenValid(): boolean {
+  if (!this.cachedToken) return false
+  
+  const jwt = decodeJwt(this.cachedToken)
+  if (!jwt.exp) return false
+  
+  // 10-second buffer to avoid using tokens about to expire
+  const currentTimeInSeconds = Math.floor(Date.now() / 1000)
+  return jwt.exp > currentTimeInSeconds + 10
+}
+```
+
+## Next Steps
+
+<CardGroup cols={3}>
+  <Card title="Go Implementation" icon="golang" href="/backend/go-example">
+    Complete Go backend example with JWKS verification
+  </Card>
+  
+  <Card title="Python Implementation" icon="python" href="/backend/python-example">
+    Flask backend with PyJWT and JWKS middleware
+  </Card>
+  
+  <Card title="Express Implementation" icon="node-js" href="/backend/express-example">
+    Express.js backend with jose library
+  </Card>
+</CardGroup>

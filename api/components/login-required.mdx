@@ -1,0 +1,155 @@
+---
+title: 'LoginRequired'
+description: 'Client component that protects pages by redirecting unauthenticated users to the login page'
+---
+
+## Overview
+
+The `LoginRequired` component wraps pages to ensure only authenticated users can access them. It automatically redirects unauthenticated users to `/login` and shows nothing while the session is loading.
+
+## Import
+
+```tsx
+import { LoginRequired } from "@/components/login-required"
+```
+
+## Usage
+
+Wrap any page content that requires authentication:
+
+```tsx
+export default function ProtectedPage() {
+  return (
+    <LoginRequired>
+      <div>
+        <h1>Dashboard</h1>
+        <p>This content is only visible to authenticated users</p>
+      </div>
+    </LoginRequired>
+  )
+}
+```
+
+## Props
+
+<ParamField path="children" type="React.ReactNode" required>
+  The page content to render once authentication is confirmed
+</ParamField>
+
+## Behavior
+
+### Session Loading
+
+While the session status is being determined (`isPending` is `true`), the component renders `null` to prevent flash of content.
+
+### Unauthenticated Users
+
+When no authenticated session exists (`!session?.user`), users are automatically redirected to `/login` using Next.js router's `replace()` method.
+
+### Authenticated Users
+
+Once an authenticated session is confirmed, the component renders its children normally.
+
+## Implementation Details
+
+The component uses:
+
+- `authClient.useSession()` from `@/lib/auth-client` to get the current session state
+- `useRouter()` from `next/navigation` for client-side navigation
+- `useEffect()` to handle redirects when authentication state changes
+
+## Example: Protected Dashboard
+
+```tsx login-required.tsx:12-27
+"use client"
+
+import { useEffect } from "react"
+import { useRouter } from "next/navigation"
+import authClient from "@/lib/auth-client"
+
+export function LoginRequired({ children }: { children: React.ReactNode }) {
+    const { data: session, isPending } = authClient.useSession()
+    const router = useRouter()
+
+    useEffect(() => {
+        if (!isPending && !session?.user) {
+            router.replace("/login")
+        }
+    }, [isPending, session, router])
+
+    if (isPending || !session?.user) {
+        return null
+    }
+
+    return <>{children}</>
+}
+```
+
+## Best Practices
+
+### Use at Page Level
+
+Wrap entire page components rather than individual sections:
+
+```tsx
+// Good
+export default function DashboardPage() {
+  return (
+    <LoginRequired>
+      <Dashboard />
+    </LoginRequired>
+  )
+}
+
+// Avoid
+export default function MixedPage() {
+  return (
+    <>
+      <PublicHeader />
+      <LoginRequired>
+        <PrivateSection />
+      </LoginRequired>
+    </>
+  )
+}
+```
+
+### Combine with Layout Protection
+
+For apps where most pages require auth, consider using `LoginRequired` in the layout:
+
+```tsx app/(dashboard)/layout.tsx
+import { LoginRequired } from "@/components/login-required"
+
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return <LoginRequired>{children}</LoginRequired>
+}
+```
+
+### Handle Loading States
+
+While `LoginRequired` returns `null` during loading, you may want to show a loading indicator in your layout:
+
+```tsx
+import { Suspense } from "react"
+import { LoginRequired } from "@/components/login-required"
+
+export default function ProtectedPage() {
+  return (
+    <Suspense fallback={<LoadingSpinner />}>
+      <LoginRequired>
+        <PageContent />
+      </LoginRequired>
+    </Suspense>
+  )
+}
+```
+
+## Related Components
+
+- [ThemeProvider](/api/components/theme-provider) - Provides theme context for the app
+- [AuthStatus](/api/components/auth-status) - Displays current authentication status

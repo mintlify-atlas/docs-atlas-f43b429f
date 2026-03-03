@@ -1,0 +1,378 @@
+---
+title: "Auth Client"
+description: "Client-side authentication methods and hooks"
+---
+
+## Overview
+
+The `authClient` is a Better Auth React client instance that provides methods for authentication and session management. It's configured with JWT support via the `jwtClient` plugin.
+
+## Configuration
+
+```typescript
+import { jwtClient } from "better-auth/client/plugins"
+import { createAuthClient } from "better-auth/react"
+
+export const authClient = createAuthClient({
+  baseURL: process.env.NEXT_PUBLIC_BETTER_AUTH_URL || "http://localhost:3000",
+  plugins: [jwtClient()],
+})
+```
+
+<ParamField path="baseURL" type="string" required>
+  The base URL where your Better Auth server is running. Set via `NEXT_PUBLIC_BETTER_AUTH_URL` environment variable.
+</ParamField>
+
+<ParamField path="plugins" type="array">
+  Array of Better Auth plugins. This boilerplate includes `jwtClient()` for JWT token support.
+</ParamField>
+
+## Methods
+
+### signIn.email()
+
+Authenticate a user with email and password.
+
+```typescript
+const result = await authClient.signIn.email({ email, password })
+if (result.error) {
+  console.error(result.error.message)
+} else {
+  // User is signed in
+}
+```
+
+<ParamField path="email" type="string" required>
+  User's email address
+</ParamField>
+
+<ParamField path="password" type="string" required>
+  User's password
+</ParamField>
+
+<ResponseField name="data" type="object">
+  Session data including user information when successful
+</ResponseField>
+
+<ResponseField name="error" type="object">
+  Error object with `message` field when authentication fails
+</ResponseField>
+
+#### Example Usage
+
+```tsx
+import { authClient } from "@/lib/auth-client"
+
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault()
+  setLoading(true)
+  setError("")
+
+  try {
+    const result = await authClient.signIn.email({ email, password })
+    if (result.error) {
+      setError(result.error.message || "Invalid email or password")
+      return
+    }
+    router.push("/")
+  } catch {
+    setError("An unexpected error occurred")
+  } finally {
+    setLoading(false)
+  }
+}
+```
+
+### signIn.social()
+
+Authenticate a user with a social provider (e.g., Google).
+
+```typescript
+const result = await authClient.signIn.social({ provider: "google" })
+if (result.error) {
+  console.error(result.error.message)
+}
+```
+
+<ParamField path="provider" type="string" required>
+  The social provider to use. Supported values: `"google"` (others can be configured in `auth.ts`)
+</ParamField>
+
+<ResponseField name="error" type="object">
+  Error object with `message` field when authentication fails
+</ResponseField>
+
+#### Example Usage
+
+```tsx
+const handleGoogleSignIn = async () => {
+  setError("")
+  try {
+    const result = await authClient.signIn.social({ provider: "google" })
+    if (result.error) {
+      setError(result.error.message || "Google sign in failed")
+    }
+  } catch {
+    setError("An unexpected error occurred")
+  }
+}
+```
+
+### signUp.email()
+
+Register a new user with email and password.
+
+```typescript
+const result = await authClient.signUp.email({ email, password, name })
+if (result.error) {
+  console.error(result.error.message)
+} else {
+  // Account created successfully
+}
+```
+
+<ParamField path="email" type="string" required>
+  User's email address
+</ParamField>
+
+<ParamField path="password" type="string" required>
+  User's password
+</ParamField>
+
+<ParamField path="name" type="string">
+  User's full name
+</ParamField>
+
+<ResponseField name="data" type="object">
+  User account data when registration is successful
+</ResponseField>
+
+<ResponseField name="error" type="object">
+  Error object with `message` field when registration fails
+</ResponseField>
+
+#### Example Usage
+
+```tsx
+import { authClient } from "@/lib/auth-client"
+
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault()
+  setLoading(true)
+  setError("")
+
+  try {
+    const result = await authClient.signUp.email({ email, password, name })
+    if (result.error) {
+      setError(result.error.message || "Failed to create account")
+      return
+    }
+    window.location.href = "/login"
+  } catch {
+    setError("An unexpected error occurred")
+  } finally {
+    setLoading(false)
+  }
+}
+```
+
+### signOut()
+
+Sign out the current user and invalidate their session.
+
+```typescript
+await authClient.signOut()
+```
+
+#### Example Usage
+
+```tsx
+import { authClient } from "@/lib/auth-client"
+
+const handleSignOut = async () => {
+  await authClient.signOut()
+  window.location.reload()
+}
+```
+
+### useSession()
+
+A React hook that returns the current session state.
+
+```typescript
+const { data: session, isPending } = authClient.useSession()
+```
+
+<ResponseField name="data" type="Session | null">
+  The current session object containing user information, or `null` if not authenticated
+</ResponseField>
+
+<ResponseField name="isPending" type="boolean">
+  `true` while the session is being loaded, `false` once loaded
+</ResponseField>
+
+#### Session Object
+
+When authenticated, the `session` object contains:
+
+<ResponseField name="user.id" type="string">
+  Unique user identifier
+</ResponseField>
+
+<ResponseField name="user.email" type="string">
+  User's email address
+</ResponseField>
+
+<ResponseField name="user.name" type="string">
+  User's full name
+</ResponseField>
+
+#### Example Usage
+
+```tsx
+import { authClient } from "@/lib/auth-client"
+
+export function AuthStatus() {
+  const { data: session, isPending } = authClient.useSession()
+
+  if (isPending) {
+    return <div>Loading...</div>
+  }
+
+  if (!session) {
+    return <div>Not authenticated</div>
+  }
+
+  return (
+    <div>
+      <p>Welcome, {session.user.name}</p>
+      <p>Email: {session.user.email}</p>
+      <p>ID: {session.user.id}</p>
+    </div>
+  )
+}
+```
+
+### token()
+
+Obtain a JWT token for the current session. Used for backend API authentication.
+
+```typescript
+const result = await authClient.token()
+const jwt = result.data?.token
+```
+
+<ResponseField name="data.token" type="string">
+  The JWT token string that can be sent to backend services in the `Authorization` header
+</ResponseField>
+
+#### Example Usage
+
+The `token()` method is typically used by API clients to inject JWT tokens into requests:
+
+```typescript
+import authClient from "./auth-client"
+import { decodeJwt } from "jose"
+
+class ApiClient {
+  private cachedToken: string | null = null
+
+  private async getToken(): Promise<string | null> {
+    // Request a new JWT from better-auth
+    const token = await authClient.token().then(x => x.data?.token) || null
+    this.cachedToken = token
+    return token
+  }
+
+  async request(endpoint: string, options: RequestInit = {}) {
+    const token = await this.getToken()
+    
+    const response = await fetch(endpoint, {
+      ...options,
+      headers: {
+        ...options.headers,
+        "Authorization": `Bearer ${token}`,
+      },
+    })
+    
+    return response.json()
+  }
+}
+```
+
+## JWT Client Plugin
+
+The `jwtClient()` plugin adds JWT token support to the auth client. This enables:
+
+- Token generation via `authClient.token()`
+- Automatic token management
+- Integration with backend services using JWKS verification
+
+### Token Format
+
+JWT tokens issued by Better Auth include the following claims:
+
+```json
+{
+  "sub": "user-id",
+  "email": "user@example.com",
+  "name": "User Name",
+  "iss": "http://localhost:3000",
+  "aud": "http://localhost:3000",
+  "exp": 1234567890,
+  "iat": 1234567890
+}
+```
+
+### Backend Verification
+
+Backend services should verify JWT tokens using the JWKS endpoint at `/api/auth/jwks`:
+
+```typescript
+import { createRemoteJWKSet, jwtVerify } from "jose"
+
+const JWKS = createRemoteJWKSet(
+  new URL("http://localhost:3000/api/auth/jwks")
+)
+
+const { payload } = await jwtVerify(token, JWKS, {
+  issuer: "http://localhost:3000",
+  audience: "http://localhost:3000",
+})
+```
+
+See [Auth Server](/api/auth-server) for backend configuration details.
+
+## TypeScript Types
+
+```typescript
+interface SignInEmailParams {
+  email: string
+  password: string
+}
+
+interface SignUpEmailParams {
+  email: string
+  password: string
+  name?: string
+}
+
+interface SignInSocialParams {
+  provider: "google" | string
+}
+
+interface Session {
+  user: {
+    id: string
+    email: string
+    name: string
+  }
+}
+
+interface AuthResult<T = unknown> {
+  data?: T
+  error?: {
+    message: string
+  }
+}
+```

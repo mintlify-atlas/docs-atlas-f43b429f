@@ -1,0 +1,625 @@
+---
+title: 'Axios-based API Client'
+description: 'A powerful API client using Axios with automatic JWT injection via interceptors'
+---
+
+## Overview
+
+The `ApiClientAxios` class provides an Axios-based HTTP client for communicating with external backend services. It uses Axios interceptors to automatically inject JWT bearer tokens before each request, providing a more feature-rich alternative to the fetch-based client.
+
+**Key Features:**
+- Automatic JWT injection via request interceptors
+- Request and response interceptors for advanced customization
+- Automatic JSON handling and transforms
+- Request cancellation support
+- Upload/download progress events
+- Unified error handling
+
+## How It Works
+
+1. An Axios request interceptor automatically fetches a JWT from better-auth before each request
+2. The JWT is injected into the `Authorization: Bearer <token>` header
+3. Each request is sent with the authenticated header
+4. A response interceptor handles errors uniformly
+5. Your backend verifies the token using the JWKS endpoint at `/api/auth/jwks`
+
+## When to Use This vs Fetch Client
+
+**Use the Axios client if you:**
+- Need request/response interceptors for advanced patterns
+- Want built-in support for request cancellation
+- Need upload/download progress tracking
+- Prefer Axios's API and error handling
+
+**Use the [fetch-based client](/api/fetch-client) if you:**
+- Want zero dependencies and smaller bundle size
+- Prefer native browser APIs
+- Need manual control over token caching
+- Target modern browsers only
+
+## Configuration
+
+Set the backend API URL using an environment variable:
+
+```bash .env.local
+NEXT_PUBLIC_BACKEND_API_URL=https://api.example.com
+```
+
+Defaults to `http://localhost:8080` for local development.
+
+## JWT Token Injection
+
+Unlike the fetch-based client, the Axios client does **not** cache tokens manually. Instead, it relies on better-auth's built-in token management and uses a request interceptor to fetch a fresh token before each request:
+
+```typescript
+this.axiosInstance.interceptors.request.use(
+  async (config) => {
+    const token = await authClient.token().then(x => x.data?.token)
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => {
+    return Promise.reject(error)
+  }
+)
+```
+
+This approach:
+- Delegates token caching to better-auth's client library
+- Ensures every request has a valid token
+- Simplifies the client implementation
+- Allows better-auth to handle token refresh logic
+
+## Usage
+
+### Basic Import
+
+```typescript
+import { apiClientAxios } from '@/lib/api-client-axios'
+```
+
+### Making Authenticated Requests
+
+The client exposes a private `request()` method that's used internally. For your own endpoints, extend the `ApiClientAxios` class:
+
+```typescript
+// Using the verifyAuth example method
+const result = await apiClientAxios.verifyAuth()
+
+if (result.error) {
+  console.error('Verification failed:', result.error)
+} else {
+  console.log('User verified:', result.data)
+}
+```
+
+### Extending the Client
+
+Add your own API methods by extending the class:
+
+```typescript
+import { ApiClientAxios, ApiResponse } from '@/lib/api-client-axios'
+
+interface Post {
+  id: string
+  userId: string
+  content: string
+  createdAt: string
+}
+
+class MyApiClient extends ApiClientAxios {
+  async getUserProfile(userId: string): Promise<ApiResponse<UserProfile>> {
+    return this.request(`/api/users/${userId}`, {
+      method: 'GET',
+    })
+  }
+
+  async createPost(content: string, tags?: string[]): Promise<ApiResponse<Post>> {
+    return this.request('/api/posts', {
+      method: 'POST',
+      data: { content, tags },
+    })
+  }
+
+  async updatePost(
+    postId: string,
+    data: Partial<Post>
+  ): Promise<ApiResponse<Post>> {
+    return this.request(`/api/posts/${postId}`, {
+      method: 'PATCH',
+      data,
+    })
+  }
+
+  async deletePost(postId: string): Promise<ApiResponse<void>> {
+    return this.request(`/api/posts/${postId}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async searchPosts(query: string): Promise<ApiResponse<Post[]>> {
+    return this.request('/api/posts/search', {
+      method: 'GET',
+      params: { q: query },
+    })
+  }
+}
+
+export const myApiClient = new MyApiClient()
+```
+
+## ApiClientAxios Class
+
+### Constructor
+
+```typescript
+const client = new ApiClientAxios(baseUrl?: string)
+```
+
+<ParamField path="baseUrl" type="string" optional>
+  The base URL for your backend API service. Defaults to the value of `NEXT_PUBLIC_BACKEND_API_URL` or `http://localhost:8080`.
+</ParamField>
+
+The constructor also sets up two interceptors:
+1. **Request interceptor**: Fetches JWT from better-auth and injects it into the Authorization header
+2. **Response interceptor**: Handles errors uniformly (can be extended for retry logic, 401 handling, etc.)
+
+### Methods
+
+#### request()
+
+Makes an authenticated HTTP request to the backend. The JWT is automatically injected by the request interceptor.
+
+```typescript
+private async request<T = unknown>(
+  endpoint: string,
+  options?: {
+    method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
+    data?: unknown
+    params?: Record<string, unknown>
+  }
+): Promise<ApiResponse<T>>
+```
+
+<ParamField path="endpoint" type="string" required>
+  The API path (e.g., `/api/users/me`). This is appended to the base URL.
+</ParamField>
+
+<ParamField path="options.method" type="string" optional default="GET">
+  The HTTP method: `GET`, `POST`, `PUT`, `DELETE`, or `PATCH`.
+</ParamField>
+
+<ParamField path="options.data" type="unknown" optional>
+  The request body data. Automatically serialized to JSON. Used with POST, PUT, PATCH requests.
+</ParamField>
+
+<ParamField path="options.params" type="Record<string, unknown>" optional>
+  URL query parameters. Automatically serialized and appended to the endpoint.
+</ParamField>
+
+<ResponseField name="data" type="T" optional>
+  The parsed JSON response data. Only present if the request was successful.
+</ResponseField>
+
+<ResponseField name="error" type="string" optional>
+  An error message if the request failed. Contains either the API error message or a client-side error description.
+</ResponseField>
+
+<ResponseField name="status" type="number">
+  The HTTP status code. Returns `0` if the request failed before reaching the server.
+</ResponseField>
+
+#### verifyAuth()
+
+Example method that verifies the current user's authentication against the backend.
+
+```typescript
+async verifyAuth(): Promise<ApiResponse<AuthVerifyResponse>>
+```
+
+<ResponseField name="data.valid" type="boolean">
+  Whether the authentication token is valid.
+</ResponseField>
+
+<ResponseField name="data.userId" type="string" optional>
+  The authenticated user's ID, if valid.
+</ResponseField>
+
+<ResponseField name="data.email" type="string" optional>
+  The authenticated user's email, if valid.
+</ResponseField>
+
+## Types
+
+### ApiResponse\<T\>
+
+Standard API response wrapper with typed data or error.
+
+```typescript
+interface ApiResponse<T = unknown> {
+  data?: T
+  error?: string
+  status: number
+}
+```
+
+<ResponseField name="data" type="T" optional>
+  The response data. Type parameter `T` allows for type-safe responses.
+</ResponseField>
+
+<ResponseField name="error" type="string" optional>
+  Error message if the request failed. Mutually exclusive with `data`.
+</ResponseField>
+
+<ResponseField name="status" type="number">
+  HTTP status code. Returns `0` for network errors or exceptions.
+</ResponseField>
+
+### UserProfile
+
+Example user profile shape. Adjust to match your backend schema.
+
+```typescript
+interface UserProfile {
+  id: string
+  email: string
+  name: string
+}
+```
+
+<ResponseField name="id" type="string">
+  Unique user identifier.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  User's email address.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  User's display name.
+</ResponseField>
+
+### AuthVerifyResponse
+
+Example auth verification response. Adjust to match your backend schema.
+
+```typescript
+interface AuthVerifyResponse {
+  valid: boolean
+  userId?: string
+  email?: string
+}
+```
+
+<ResponseField name="valid" type="boolean">
+  Whether the JWT token is valid.
+</ResponseField>
+
+<ResponseField name="userId" type="string" optional>
+  The authenticated user's ID if the token is valid.
+</ResponseField>
+
+<ResponseField name="email" type="string" optional>
+  The authenticated user's email if the token is valid.
+</ResponseField>
+
+## Advanced Patterns
+
+### Custom Interceptors
+
+You can add additional interceptors to the Axios instance:
+
+```typescript
+import { ApiClientAxios } from '@/lib/api-client-axios'
+
+class CustomApiClient extends ApiClientAxios {
+  constructor(baseUrl?: string) {
+    super(baseUrl)
+
+    // Add a request interceptor for logging
+    this.axiosInstance.interceptors.request.use(
+      (config) => {
+        console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`)
+        return config
+      }
+    )
+
+    // Add a response interceptor for timing
+    this.axiosInstance.interceptors.response.use(
+      (response) => {
+        const duration = Date.now() - response.config.metadata?.startTime
+        console.log(`[API] Response received in ${duration}ms`)
+        return response
+      }
+    )
+  }
+}
+```
+
+### Error Handling with Retry Logic
+
+```typescript
+import { ApiClientAxios } from '@/lib/api-client-axios'
+import axios from 'axios'
+
+class ResilientApiClient extends ApiClientAxios {
+  constructor(baseUrl?: string) {
+    super(baseUrl)
+
+    // Add retry logic for failed requests
+    this.axiosInstance.interceptors.response.use(
+      (response) => response,
+      async (error) => {
+        const config = error.config
+
+        // Retry on network errors or 5xx status codes
+        if (!config || config.__retryCount >= 3) {
+          return Promise.reject(error)
+        }
+
+        config.__retryCount = config.__retryCount || 0
+        config.__retryCount += 1
+
+        const backoff = new Promise((resolve) => {
+          setTimeout(() => resolve(true), config.__retryCount * 1000)
+        })
+
+        await backoff
+        return this.axiosInstance(config)
+      }
+    )
+  }
+}
+```
+
+### Request Cancellation
+
+```typescript
+import { ApiClientAxios } from '@/lib/api-client-axios'
+import axios from 'axios'
+
+class CancellableApiClient extends ApiClientAxios {
+  private cancelTokenSource = axios.CancelToken.source()
+
+  async searchPosts(query: string): Promise<ApiResponse<Post[]>> {
+    // Cancel previous search if still pending
+    this.cancelTokenSource.cancel('New search initiated')
+    this.cancelTokenSource = axios.CancelToken.source()
+
+    return this.request('/api/posts/search', {
+      method: 'GET',
+      params: { q: query },
+      cancelToken: this.cancelTokenSource.token,
+    })
+  }
+}
+```
+
+### Upload with Progress Tracking
+
+```typescript
+import { ApiClientAxios } from '@/lib/api-client-axios'
+
+class UploadApiClient extends ApiClientAxios {
+  async uploadFile(
+    file: File,
+    onProgress?: (progress: number) => void
+  ): Promise<ApiResponse<{ url: string }>> {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    try {
+      const token = await authClient.token().then(x => x.data?.token)
+
+      const response = await this.axiosInstance.post('/api/upload', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          Authorization: token ? `Bearer ${token}` : '',
+        },
+        onUploadProgress: (progressEvent) => {
+          const progress = progressEvent.total
+            ? Math.round((progressEvent.loaded * 100) / progressEvent.total)
+            : 0
+          onProgress?.(progress)
+        },
+      })
+
+      return {
+        data: response.data,
+        status: response.status,
+      }
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        return {
+          error: error.response?.data?.message || error.message,
+          status: error.response?.status || 0,
+        }
+      }
+      return {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        status: 0,
+      }
+    }
+  }
+}
+```
+
+## Complete Example
+
+Here's a complete example showing how to create a custom API client with multiple endpoints and advanced features:
+
+```typescript
+import { ApiClientAxios, ApiResponse, UserProfile } from '@/lib/api-client-axios'
+import axios from 'axios'
+
+interface Post {
+  id: string
+  userId: string
+  content: string
+  tags: string[]
+  createdAt: string
+}
+
+interface CreatePostRequest {
+  content: string
+  tags?: string[]
+}
+
+interface PaginatedResponse<T> {
+  items: T[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+class BlogApiClient extends ApiClientAxios {
+  constructor() {
+    super()
+
+    // Add response interceptor for handling 401 errors
+    this.axiosInstance.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response?.status === 401) {
+          // Redirect to login or refresh token
+          window.location.href = '/login'
+        }
+        return Promise.reject(error)
+      }
+    )
+  }
+
+  // Get current user profile
+  async getMe(): Promise<ApiResponse<UserProfile>> {
+    return this.request('/api/users/me', {
+      method: 'GET',
+    })
+  }
+
+  // Get paginated posts
+  async getPosts(
+    page: number = 1,
+    pageSize: number = 10
+  ): Promise<ApiResponse<PaginatedResponse<Post>>> {
+    return this.request('/api/posts', {
+      method: 'GET',
+      params: { page, pageSize },
+    })
+  }
+
+  // Search posts with debouncing
+  async searchPosts(query: string): Promise<ApiResponse<Post[]>> {
+    return this.request('/api/posts/search', {
+      method: 'GET',
+      params: { q: query },
+    })
+  }
+
+  // Create a new post
+  async createPost(data: CreatePostRequest): Promise<ApiResponse<Post>> {
+    return this.request('/api/posts', {
+      method: 'POST',
+      data,
+    })
+  }
+
+  // Update a post
+  async updatePost(
+    postId: string,
+    data: Partial<CreatePostRequest>
+  ): Promise<ApiResponse<Post>> {
+    return this.request(`/api/posts/${postId}`, {
+      method: 'PATCH',
+      data,
+    })
+  }
+
+  // Delete a post
+  async deletePost(postId: string): Promise<ApiResponse<void>> {
+    return this.request(`/api/posts/${postId}`, {
+      method: 'DELETE',
+    })
+  }
+}
+
+export const blogApi = new BlogApiClient()
+
+// Usage in a React component
+import { useState } from 'react'
+import { blogApi } from '@/lib/blog-api'
+
+function CreatePostForm() {
+  const [content, setContent] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setError(null)
+
+    const result = await blogApi.createPost({ content })
+
+    if (result.error) {
+      setError(result.error)
+    } else {
+      console.log('Post created:', result.data)
+      setContent('')
+    }
+
+    setLoading(false)
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <textarea
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        placeholder="Write your post..."
+      />
+      <button type="submit" disabled={loading}>
+        {loading ? 'Creating...' : 'Create Post'}
+      </button>
+      {error && <p className="error">{error}</p>}
+    </form>
+  )
+}
+```
+
+## Comparison with Fetch Client
+
+| Feature | Fetch Client | Axios Client |
+|---------|--------------|---------------|
+| Dependencies | Zero (native fetch) | Requires axios package |
+| Token Caching | Manual with 10s buffer | Delegated to better-auth |
+| Interceptors | Not available | Request/response interceptors |
+| Bundle Size | ~0KB (native) | ~13KB (gzipped) |
+| Browser Support | Modern browsers | Wider compatibility |
+| Cancel Tokens | AbortController | Built-in CancelToken |
+| Progress Events | Limited | Full upload/download progress |
+| Error Handling | Manual parsing | Automatic with interceptors |
+| Request Transform | Manual | Built-in transformers |
+
+**Choose Axios client when you need:**
+- Advanced interceptor patterns
+- Request cancellation
+- Upload/download progress tracking
+- Automatic request/response transformation
+- Better error handling and retry logic
+
+**Choose [fetch client](/api/fetch-client) when you need:**
+- Minimal bundle size
+- No external dependencies
+- Manual control over token caching
+- Simple request/response patterns
+
+## Security Notes
+
+- Tokens are short-lived JWTs signed with the server's private key (Ed25519 by default)
+- The backend should always validate the token signature via JWKS, not just decode it
+- In production, always use HTTPS for both the auth server and the backend
+- The request interceptor fetches a fresh token before each request, delegating caching to better-auth
+- Never log or expose JWT tokens in client-side code
+- Consider implementing token refresh logic in the response interceptor for 401 errors

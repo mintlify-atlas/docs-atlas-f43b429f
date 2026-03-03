@@ -1,0 +1,623 @@
+---
+title: Express Backend Example
+description: Complete guide to JWT verification in Express.js using jose library
+---
+
+This guide shows how to verify Better Auth JWTs in an Express.js backend using the `jose` library for JWKS fetching and JWT verification.
+
+## Installation
+
+Install the required dependencies:
+
+```bash
+npm install express jose
+```
+
+- `express`: Web framework for Node.js
+- `jose`: Modern JavaScript implementation of JOSE standards (JWT, JWK, JWS, etc.)
+
+## Basic Example
+
+Here's a complete Express.js server with JWT verification:
+
+```javascript index.js
+import express from "express";
+import { createRemoteJWKSet, jwtVerify } from "jose";
+
+const app = express();
+
+// Configuration
+const BETTER_AUTH_URL = process.env.BETTER_AUTH_URL || "http://localhost:3000";
+const PORT = process.env.PORT || 8080;
+
+// Create JWKS client (automatically caches and refreshes keys)
+const JWKS = createRemoteJWKSet(
+  new URL(`${BETTER_AUTH_URL}/api/auth/jwks`)
+);
+
+// Middleware to verify JWT tokens
+async function requireAuth(req, res, next) {
+  const auth = req.headers.authorization;
+  
+  if (!auth?.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  
+  const token = auth.slice(7); // Remove "Bearer " prefix
+  
+  try {
+    const { payload } = await jwtVerify(token, JWKS, {
+      issuer: BETTER_AUTH_URL,
+      audience: BETTER_AUTH_URL,
+    });
+    
+    // Attach user to request object
+    req.user = payload;
+    next();
+  } catch (error) {
+    console.error("JWT verification failed:", error.message);
+    return res.status(401).json({ error: "Invalid token" });
+  }
+}
+
+// Public route
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
+// Protected route
+app.get("/api/me", requireAuth, (req, res) => {
+  res.json({
+    sub: req.user.sub,
+    email: req.user.email,
+    name: req.user.name,
+  });
+});
+
+app.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
+  console.log(`JWKS URL: ${BETTER_AUTH_URL}/api/auth/jwks`);
+});
+```
+
+Update your `package.json` to use ES modules:
+
+```json package.json
+{
+  "name": "my-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "jose": "^5.2.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
+  }
+}
+```
+
+## Middleware Pattern
+
+Create reusable auth middleware with better error handling:
+
+```javascript middleware/auth.js
+import { jwtVerify, createRemoteJWKSet } from "jose";
+
+class AuthMiddleware {
+  constructor(jwksUrl, issuer, audience) {
+    this.jwks = createRemoteJWKSet(new URL(jwksUrl));
+    this.issuer = issuer;
+    this.audience = audience;
+  }
+
+  /**
+   * Middleware that requires authentication
+   */
+  requireAuth = async (req, res, next) => {
+    try {
+      const user = await this.verifyRequest(req);
+      req.user = user;
+      next();
+    } catch (error) {
+      this.handleAuthError(error, res);
+    }
+  };
+
+  /**
+   * Middleware for optional authentication
+   */
+  optionalAuth = async (req, res, next) => {
+    try {
+      const user = await this.verifyRequest(req);
+      req.user = user;
+    } catch (error) {
+      req.user = null;
+    }
+    next();
+  };
+
+  /**
+   * Verify JWT from request
+   */
+  async verifyRequest(req) {
+    const auth = req.headers.authorization;
+
+    if (!auth?.startsWith("Bearer ")) {
+      throw new AuthError("Missing authorization header", 401);
+    }
+
+    const token = auth.slice(7);
+
+    try {
+      const { payload } = await jwtVerify(token, this.jwks, {
+        issuer: this.issuer,
+        audience: this.audience,
+      });
+
+      return payload;
+    } catch (error) {
+      if (error.code === "ERR_JWT_EXPIRED") {
+        throw new AuthError("Token expired", 401);
+      }
+      if (error.code === "ERR_JWT_CLAIM_VALIDATION_FAILED") {
+        throw new AuthError("Invalid token claims", 401);
+      }
+      throw new AuthError("Invalid token", 401);
+    }
+  }
+
+  /**
+   * Handle authentication errors
+   */
+  handleAuthError(error, res) {
+    const status = error.status || 401;
+    const message = error.message || "Unauthorized";
+    
+    console.error(`Auth error: ${message}`);
+    res.status(status).json({ error: message });
+  }
+}
+
+class AuthError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+  }
+}
+
+export default AuthMiddleware;
+```
+
+Use the middleware in your app:
+
+```javascript index.js
+import express from "express";
+import AuthMiddleware from "./middleware/auth.js";
+
+const app = express();
+
+const BETTER_AUTH_URL = process.env.BETTER_AUTH_URL || "http://localhost:3000";
+const PORT = process.env.PORT || 8080;
+
+// Initialize auth middleware
+const auth = new AuthMiddleware(
+  `${BETTER_AUTH_URL}/api/auth/jwks`,
+  BETTER_AUTH_URL,
+  BETTER_AUTH_URL
+);
+
+app.use(express.json());
+
+// Public routes
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
+// Protected routes
+app.get("/api/me", auth.requireAuth, (req, res) => {
+  res.json({
+    sub: req.user.sub,
+    email: req.user.email,
+    name: req.user.name,
+  });
+});
+
+app.get("/api/posts", auth.requireAuth, (req, res) => {
+  res.json({
+    posts: [],
+    userId: req.user.sub,
+  });
+});
+
+// Route with optional auth
+app.get("/api/public-posts", auth.optionalAuth, (req, res) => {
+  res.json({
+    posts: [],
+    userId: req.user?.sub || null,
+  });
+});
+
+app.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
+  console.log(`JWKS URL: ${BETTER_AUTH_URL}/api/auth/jwks`);
+});
+```
+
+## TypeScript Example
+
+For better type safety, use TypeScript:
+
+```bash
+npm install --save-dev typescript @types/express @types/node ts-node
+```
+
+```typescript src/index.ts
+import express, { Request, Response, NextFunction } from "express";
+import { createRemoteJWKSet, jwtVerify, JWTPayload } from "jose";
+
+const app = express();
+
+const BETTER_AUTH_URL = process.env.BETTER_AUTH_URL || "http://localhost:3000";
+const PORT = parseInt(process.env.PORT || "8080");
+
+const JWKS = createRemoteJWKSet(
+  new URL(`${BETTER_AUTH_URL}/api/auth/jwks`)
+);
+
+// Extend Express Request type
+interface AuthRequest extends Request {
+  user?: JWTPayload;
+}
+
+// Auth middleware
+async function requireAuth(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const auth = req.headers.authorization;
+
+  if (!auth?.startsWith("Bearer ")) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const token = auth.slice(7);
+
+  try {
+    const { payload } = await jwtVerify(token, JWKS, {
+      issuer: BETTER_AUTH_URL,
+      audience: BETTER_AUTH_URL,
+    });
+
+    req.user = payload;
+    next();
+  } catch (error) {
+    console.error("JWT verification failed:", error);
+    res.status(401).json({ error: "Invalid token" });
+  }
+}
+
+app.get("/health", (_req: Request, res: Response) => {
+  res.json({ status: "ok" });
+});
+
+app.get("/api/me", requireAuth, (req: AuthRequest, res: Response) => {
+  res.json({
+    sub: req.user?.sub,
+    email: req.user?.email,
+    name: req.user?.name,
+  });
+});
+
+app.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
+});
+```
+
+```json tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules"]
+}
+```
+
+Update scripts:
+
+```json package.json
+{
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  }
+}
+```
+
+## Error Handling
+
+Implement comprehensive error handling:
+
+```javascript middleware/errorHandler.js
+export function errorHandler(err, req, res, next) {
+  console.error(err.stack);
+
+  // JWT-specific errors
+  if (err.code?.startsWith("ERR_JWT")) {
+    return res.status(401).json({
+      error: "Authentication failed",
+      details: err.message,
+    });
+  }
+
+  // Generic errors
+  res.status(err.status || 500).json({
+    error: err.message || "Internal server error",
+  });
+}
+```
+
+Use in your app:
+
+```javascript
+import { errorHandler } from "./middleware/errorHandler.js";
+
+// ... routes ...
+
+// Error handler should be last
+app.use(errorHandler);
+```
+
+## Configuration Management
+
+Use environment variables with validation:
+
+```javascript config/index.js
+class Config {
+  constructor() {
+    this.betterAuthUrl = this.getEnv("BETTER_AUTH_URL", "http://localhost:3000");
+    this.port = parseInt(this.getEnv("PORT", "8080"));
+    this.nodeEnv = this.getEnv("NODE_ENV", "development");
+    this.jwksUrl = `${this.betterAuthUrl}/api/auth/jwks`;
+  }
+
+  getEnv(key, defaultValue) {
+    const value = process.env[key];
+    if (value === undefined) {
+      if (defaultValue === undefined) {
+        throw new Error(`Missing required environment variable: ${key}`);
+      }
+      return defaultValue;
+    }
+    return value;
+  }
+
+  get isProduction() {
+    return this.nodeEnv === "production";
+  }
+}
+
+export default new Config();
+```
+
+Use in your app:
+
+```javascript
+import config from "./config/index.js";
+
+const JWKS = createRemoteJWKSet(new URL(config.jwksUrl));
+
+app.listen(config.port, () => {
+  console.log(`Server listening on port ${config.port}`);
+  console.log(`Environment: ${config.nodeEnv}`);
+});
+```
+
+## Testing
+
+Test your JWT verification with Jest:
+
+```bash
+npm install --save-dev jest supertest
+```
+
+```javascript __tests__/auth.test.js
+import request from "supertest";
+import app from "../index.js";
+
+describe("Authentication", () => {
+  describe("GET /api/me", () => {
+    it("should reject requests without token", async () => {
+      const response = await request(app).get("/api/me");
+      
+      expect(response.status).toBe(401);
+      expect(response.body.error).toBeDefined();
+    });
+
+    it("should reject requests with invalid token", async () => {
+      const response = await request(app)
+        .get("/api/me")
+        .set("Authorization", "Bearer invalid.token.here");
+      
+      expect(response.status).toBe(401);
+    });
+
+    // Note: For valid token tests, you'd need to generate a real JWT
+    // from your test Better Auth instance
+  });
+
+  describe("GET /health", () => {
+    it("should work without authentication", async () => {
+      const response = await request(app).get("/health");
+      
+      expect(response.status).toBe(200);
+      expect(response.body.status).toBe("ok");
+    });
+  });
+});
+```
+
+## Environment Variables
+
+Create a `.env` file for development:
+
+```bash .env
+BETTER_AUTH_URL=http://localhost:3000
+PORT=8080
+NODE_ENV=development
+```
+
+Load with `dotenv`:
+
+```bash
+npm install dotenv
+```
+
+```javascript index.js
+import "dotenv/config";
+import express from "express";
+// ... rest of your code
+```
+
+## Production Deployment
+
+### Docker Example
+
+```dockerfile Dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --only=production
+
+COPY . .
+
+EXPOSE 8080
+
+CMD ["node", "index.js"]
+```
+
+Build and run:
+
+```bash
+docker build -t my-backend .
+docker run -p 8080:8080 -e BETTER_AUTH_URL=http://localhost:3000 my-backend
+```
+
+### Using PM2
+
+For production process management:
+
+```bash
+npm install -g pm2
+```
+
+```javascript ecosystem.config.js
+module.exports = {
+  apps: [{
+    name: "backend",
+    script: "./index.js",
+    instances: "max",
+    exec_mode: "cluster",
+    env: {
+      NODE_ENV: "production",
+      PORT: 8080,
+    },
+  }],
+};
+```
+
+Run with:
+
+```bash
+pm2 start ecosystem.config.js
+```
+
+## CORS Configuration
+
+If your frontend is on a different domain:
+
+```bash
+npm install cors
+```
+
+```javascript
+import cors from "cors";
+
+const corsOptions = {
+  origin: process.env.FRONTEND_URL || "http://localhost:3000",
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
+```
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="'Cannot use import statement outside a module'">
+    Add `"type": "module"` to your `package.json`:
+    
+    ```json
+    {
+      "type": "module"
+    }
+    ```
+    
+    Or rename files to `.mjs` extension.
+  </Accordion>
+  
+  <Accordion title="'Invalid signature' error">
+    Verify:
+    1. JWKS URL is correct and accessible
+    2. Issuer and audience match Better Auth URL
+    3. Token was issued by the correct instance
+    
+    Test JWKS endpoint:
+    ```bash
+    curl http://localhost:3000/api/auth/jwks
+    ```
+  </Accordion>
+  
+  <Accordion title="CORS errors">
+    Install and configure `cors` middleware:
+    
+    ```javascript
+    import cors from "cors";
+    app.use(cors());
+    ```
+  </Accordion>
+  
+  <Accordion title="Token expired errors">
+    JWTs have limited lifetime. The frontend `api-client.ts` automatically refreshes tokens with a 10-second buffer before expiration.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Go Example" icon="golang" href="/backend/go-example">
+    See how to implement JWT verification in Go
+  </Card>
+  
+  <Card title="Python Example" icon="python" href="/backend/python-example">
+    Learn how to verify JWTs in Python with Flask
+  </Card>
+</CardGroup>

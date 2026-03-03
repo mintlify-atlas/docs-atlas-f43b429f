@@ -1,0 +1,518 @@
+---
+title: Adding Tables
+description: Learn how to extend the database schema with custom tables and relationships
+---
+
+The Auth UI Boilerplate comes with Better Auth tables, but you'll likely need to add custom tables for your application. This guide shows you how to extend the schema with your own tables.
+
+## Quick Example
+
+Here's the complete workflow for adding a `post` table:
+
+<Steps>
+  <Step title="Define the table in schema.ts">
+    Add your table definition to `src/db/schema.ts`:
+    
+    ```ts src/db/schema.ts
+    import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
+    
+    export const post = pgTable("post", {
+      id: text("id").primaryKey(),
+      title: text("title").notNull(),
+      userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+      createdAt: timestamp("created_at").$defaultFn(() => new Date()).notNull(),
+    });
+    ```
+  </Step>
+  
+  <Step title="Apply schema changes">
+    For development, use `db:push` for instant updates:
+    
+    ```bash
+    npm run db:push
+    ```
+    
+    Or for production, generate and run migrations:
+    
+    ```bash
+    npm run db:generate
+    npm run db:migrate
+    ```
+  </Step>
+  
+  <Step title="Query your new table">
+    Import and use your table in your code:
+    
+    ```ts
+    import { db } from "@/db";
+    import { post } from "@/db/schema";
+    
+    const posts = await db.select().from(post);
+    ```
+  </Step>
+</Steps>
+
+## Table Definition Basics
+
+### Import Column Types
+
+First, import the column types you need from `drizzle-orm/pg-core`:
+
+```ts
+import { 
+  pgTable,      // Table constructor
+  text,         // Text columns
+  integer,      // Integer numbers
+  boolean,      // True/false
+  timestamp,    // Dates and times
+  json,         // JSON data
+  serial,       // Auto-incrementing integers
+  varchar,      // Variable-length strings
+  numeric,      // Decimal numbers
+} from "drizzle-orm/pg-core";
+```
+
+### Define Your Table
+
+Use `pgTable()` to define a new table:
+
+```ts
+export const tableName = pgTable("table_name", {
+  // Column definitions go here
+});
+```
+
+### Common Column Patterns
+
+<CodeGroup>
+```ts Primary Key (Text)
+id: text("id").primaryKey()
+```
+
+```ts Primary Key (Auto-increment)
+id: serial("id").primaryKey()
+```
+
+```ts Required Text Field
+name: text("name").notNull()
+```
+
+```ts Optional Text Field
+description: text("description")
+```
+
+```ts Unique Email
+email: text("email").notNull().unique()
+```
+
+```ts Boolean with Default
+isPublished: boolean("is_published").$defaultFn(() => false).notNull()
+```
+
+```ts Timestamp with Auto-creation
+createdAt: timestamp("created_at").$defaultFn(() => new Date()).notNull()
+```
+
+```ts JSON Column
+metadata: json("metadata")
+```
+</CodeGroup>
+
+## Adding Foreign Keys
+
+Foreign keys create relationships between tables. Use `.references()` to link to another table.
+
+### Basic Foreign Key
+
+```ts src/db/schema.ts
+export const post = pgTable("post", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id),
+});
+```
+
+This creates a foreign key from `post.userId` to `user.id`.
+
+### Cascade Delete
+
+Use `{ onDelete: "cascade" }` to automatically delete child records when the parent is deleted:
+
+```ts src/db/schema.ts
+export const post = pgTable("post", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+});
+```
+
+Now when a user is deleted, all their posts are automatically deleted too.
+
+<Note>
+  All Better Auth tables use cascade delete for foreign keys. This ensures sessions and accounts are cleaned up when a user is deleted.
+</Note>
+
+### Other Referential Actions
+
+```ts
+// Set to null when parent is deleted
+references(() => user.id, { onDelete: "set null" })
+
+// Prevent deletion if children exist
+references(() => user.id, { onDelete: "restrict" })
+
+// Set to default value when parent is deleted
+references(() => user.id, { onDelete: "set default" })
+
+// Do nothing (database default)
+references(() => user.id, { onDelete: "no action" })
+```
+
+## Complete Example: Posts Table
+
+Here's a complete example from the README showing a posts table with all the common patterns:
+
+<Steps>
+  <Step title="Define the table">
+    Add this to `src/db/schema.ts`:
+    
+    ```ts src/db/schema.ts
+    import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
+    
+    export const post = pgTable("post", {
+      id: text("id").primaryKey(),
+      title: text("title").notNull(),
+      userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+      createdAt: timestamp("created_at").$defaultFn(() => new Date()).notNull(),
+    });
+    ```
+    
+    **What this does:**
+    - `id`: Primary key (you generate this, e.g., with `nanoid()` or `uuid`)
+    - `title`: Required text field for the post title
+    - `userId`: Foreign key to the `user` table with cascade delete
+    - `createdAt`: Automatically set to current date when created
+  </Step>
+  
+  <Step title="Push or migrate">
+    For development:
+    
+    ```bash
+    npm run db:push
+    ```
+    
+    For production:
+    
+    ```bash
+    npm run db:generate
+    npm run db:migrate
+    ```
+  </Step>
+  
+  <Step title="Use the table">
+    Query your new table:
+    
+    ```ts
+    import { db } from "@/db";
+    import { post } from "@/db/schema";
+    
+    const posts = await db.select().from(post);
+    ```
+  </Step>
+</Steps>
+
+## Querying Custom Tables
+
+### Basic Queries
+
+```ts
+import { db } from "@/db";
+import { post } from "@/db/schema";
+import { eq, desc } from "drizzle-orm";
+
+// Select all posts
+const allPosts = await db.select().from(post);
+
+// Select with condition
+const userPosts = await db
+  .select()
+  .from(post)
+  .where(eq(post.userId, "user_123"));
+
+// Select with ordering
+const recentPosts = await db
+  .select()
+  .from(post)
+  .orderBy(desc(post.createdAt));
+
+// Select specific columns
+const titles = await db
+  .select({ title: post.title })
+  .from(post);
+```
+
+### Joins
+
+Join posts with their authors:
+
+```ts
+import { db } from "@/db";
+import { post, user } from "@/db/schema";
+import { eq } from "drizzle-orm";
+
+const postsWithAuthors = await db
+  .select({
+    postId: post.id,
+    title: post.title,
+    authorName: user.name,
+    authorEmail: user.email,
+  })
+  .from(post)
+  .leftJoin(user, eq(post.userId, user.id));
+```
+
+### Insert
+
+```ts
+import { db } from "@/db";
+import { post } from "@/db/schema";
+import { nanoid } from "nanoid";
+
+const newPost = await db.insert(post).values({
+  id: nanoid(),
+  title: "My First Post",
+  userId: "user_123",
+  createdAt: new Date(),
+});
+```
+
+### Update
+
+```ts
+import { db } from "@/db";
+import { post } from "@/db/schema";
+import { eq } from "drizzle-orm";
+
+await db
+  .update(post)
+  .set({ title: "Updated Title" })
+  .where(eq(post.id, "post_123"));
+```
+
+### Delete
+
+```ts
+import { db } from "@/db";
+import { post } from "@/db/schema";
+import { eq } from "drizzle-orm";
+
+await db
+  .delete(post)
+  .where(eq(post.id, "post_123"));
+```
+
+## Advanced Examples
+
+### Many-to-Many Relationship
+
+For a many-to-many relationship (e.g., posts and tags), create a junction table:
+
+```ts src/db/schema.ts
+export const tag = pgTable("tag", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().unique(),
+});
+
+export const postTag = pgTable("post_tag", {
+  postId: text("post_id")
+    .notNull()
+    .references(() => post.id, { onDelete: "cascade" }),
+  tagId: text("tag_id")
+    .notNull()
+    .references(() => tag.id, { onDelete: "cascade" }),
+});
+```
+
+Query posts with their tags:
+
+```ts
+import { db } from "@/db";
+import { post, postTag, tag } from "@/db/schema";
+import { eq } from "drizzle-orm";
+
+const postsWithTags = await db
+  .select({
+    postId: post.id,
+    title: post.title,
+    tagName: tag.name,
+  })
+  .from(post)
+  .leftJoin(postTag, eq(post.id, postTag.postId))
+  .leftJoin(tag, eq(postTag.tagId, tag.id));
+```
+
+### Composite Primary Key
+
+For junction tables, you might want a composite primary key:
+
+```ts src/db/schema.ts
+import { pgTable, text, primaryKey } from "drizzle-orm/pg-core";
+
+export const postTag = pgTable(
+  "post_tag",
+  {
+    postId: text("post_id")
+      .notNull()
+      .references(() => post.id, { onDelete: "cascade" }),
+    tagId: text("tag_id")
+      .notNull()
+      .references(() => tag.id, { onDelete: "cascade" }),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.postId, table.tagId] }),
+  })
+);
+```
+
+### Enum Columns
+
+For columns with predefined values, use `pgEnum`:
+
+```ts src/db/schema.ts
+import { pgTable, text, pgEnum } from "drizzle-orm/pg-core";
+
+export const postStatusEnum = pgEnum("post_status", ["draft", "published", "archived"]);
+
+export const post = pgTable("post", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  status: postStatusEnum("status").notNull().default("draft"),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+});
+```
+
+## Type Inference
+
+Drizzle automatically infers TypeScript types from your schema:
+
+```ts
+import { post } from "@/db/schema";
+import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
+
+// Type for selecting from database
+type Post = InferSelectModel<typeof post>;
+// { id: string; title: string; userId: string; createdAt: Date }
+
+// Type for inserting into database
+type NewPost = InferInsertModel<typeof post>;
+// { id: string; title: string; userId: string; createdAt?: Date }
+```
+
+Use these types in your functions:
+
+```ts
+import type { InferSelectModel } from "drizzle-orm";
+import { post } from "@/db/schema";
+
+type Post = InferSelectModel<typeof post>;
+
+function displayPost(post: Post) {
+  console.log(post.title);
+  console.log(post.createdAt);
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use cascade delete for owned relationships">
+    If a child record should be deleted when its parent is deleted, use cascade:
+    
+    ```ts
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" })
+    ```
+    
+    Examples: user sessions, user posts, user profiles
+  </Accordion>
+  
+  <Accordion title="Add createdAt and updatedAt timestamps">
+    Track when records are created and modified:
+    
+    ```ts
+    createdAt: timestamp("created_at").$defaultFn(() => new Date()).notNull(),
+    updatedAt: timestamp("updated_at").$defaultFn(() => new Date()).notNull(),
+    ```
+    
+    For `updatedAt`, you'll need to manually update it in your queries:
+    
+    ```ts
+    await db.update(post)
+      .set({ 
+        title: "New Title",
+        updatedAt: new Date() 
+      })
+      .where(eq(post.id, "post_123"));
+    ```
+  </Accordion>
+  
+  <Accordion title="Use text IDs over serial">
+    Text IDs (like `nanoid()` or UUIDs) are better for distributed systems:
+    
+    ```ts
+    // Good
+    id: text("id").primaryKey()
+    
+    // Less flexible
+    id: serial("id").primaryKey()
+    ```
+    
+    Better Auth uses text IDs, so staying consistent makes relationships cleaner.
+  </Accordion>
+  
+  <Accordion title="Export all tables from schema.ts">
+    Always export your table definitions so they can be imported elsewhere:
+    
+    ```ts
+    export const post = pgTable("post", { /* ... */ });
+    export const tag = pgTable("tag", { /* ... */ });
+    export const postTag = pgTable("post_tag", { /* ... */ });
+    ```
+  </Accordion>
+  
+  <Accordion title="Test schema changes locally first">
+    Always test schema changes with `db:push` locally before generating migrations:
+    
+    ```bash
+    # 1. Add table to schema.ts
+    # 2. Test locally
+    npm run db:push
+    npm run db:studio  # Verify in Studio
+    
+    # 3. Generate migration for production
+    npm run db:generate
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Schema Reference" icon="table" href="/database/schema">
+    View all Better Auth tables
+  </Card>
+  <Card title="Migrations" icon="arrows-rotate" href="/database/migrations">
+    Learn about migration workflows
+  </Card>
+  <Card title="Drizzle Query Docs" icon="code" href="https://orm.drizzle.team/docs/select">
+    Official Drizzle query documentation
+  </Card>
+  <Card title="Drizzle Schema Docs" icon="book" href="https://orm.drizzle.team/docs/tables">
+    Official schema documentation
+  </Card>
+</CardGroup>

@@ -1,0 +1,370 @@
+---
+title: Database Migrations
+description: Learn how to manage database schema changes with Drizzle migrations
+---
+
+Drizzle provides two workflows for applying schema changes: **push** for development and **migrations** for production.
+
+## Development vs Production
+
+<CardGroup cols={2}>
+  <Card title="Development: db:push" icon="rocket">
+    Quick schema updates without migration files - perfect for rapid iteration
+  </Card>
+  <Card title="Production: Migrations" icon="shield">
+    Versioned migration files for controlled, trackable schema changes
+  </Card>
+</CardGroup>
+
+## Available Commands
+
+All database commands are defined in `package.json`:
+
+```json package.json
+{
+  "scripts": {
+    "db:push": "drizzle-kit push",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
+  }
+}
+```
+
+### db:push
+
+Pushes your schema directly to the database without creating migration files.
+
+```bash
+npm run db:push
+```
+
+<Note>
+  **When to use:** Development only. Use this for rapid prototyping and local development when you want instant schema updates.
+</Note>
+
+**What it does:**
+- Compares your `src/db/schema.ts` with the current database state
+- Generates and executes SQL to sync the database
+- Does NOT create migration files
+- Cannot be rolled back
+
+**Typical workflow:**
+
+<Steps>
+  <Step title="Edit schema">
+    Modify your schema in `src/db/schema.ts`
+  </Step>
+  
+  <Step title="Push changes">
+    ```bash
+    npm run db:push
+    ```
+  </Step>
+  
+  <Step title="Verify">
+    Changes are immediately applied to your database
+  </Step>
+</Steps>
+
+### db:generate
+
+Generates SQL migration files from schema changes.
+
+```bash
+npm run db:generate
+```
+
+<Note>
+  **When to use:** Production deployments. Creates versioned migration files that can be committed to version control.
+</Note>
+
+**What it does:**
+- Compares your `src/db/schema.ts` with the last migration snapshot
+- Generates SQL migration files in `src/db/migrations/`
+- Creates a `meta/` folder with migration metadata
+- Does NOT execute the migration
+
+**Example output:**
+
+```
+src/db/migrations/
+├── 0000_initial_schema.sql
+├── 0001_add_post_table.sql
+└── meta/
+    ├── _journal.json
+    └── 0001_snapshot.json
+```
+
+### db:migrate
+
+Executes pending migration files against the database.
+
+```bash
+npm run db:migrate
+```
+
+<Note>
+  **When to use:** After running `db:generate`, or when deploying to production.
+</Note>
+
+**What it does:**
+- Reads migration files from `src/db/migrations/`
+- Executes any pending migrations in order
+- Tracks which migrations have been applied
+- Can be run multiple times safely (idempotent)
+
+### db:studio
+
+Opens Drizzle Studio - a visual database browser.
+
+```bash
+npm run db:studio
+```
+
+**What it does:**
+- Launches a web interface at `https://local.drizzle.studio`
+- Allows you to browse tables and data
+- Supports editing records directly
+- Useful for debugging and data inspection
+
+<Warning>
+  Drizzle Studio runs locally and connects directly to your database. Don't expose it to the internet.
+</Warning>
+
+## Migration Workflows
+
+### Development Workflow (db:push)
+
+For rapid local development:
+
+<Steps>
+  <Step title="Make schema changes">
+    Edit `src/db/schema.ts` to add/modify tables:
+    
+    ```ts
+    export const post = pgTable("post", {
+      id: text("id").primaryKey(),
+      title: text("title").notNull(),
+      content: text("content"),
+      userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+      createdAt: timestamp("created_at").$defaultFn(() => new Date()).notNull(),
+    });
+    ```
+  </Step>
+  
+  <Step title="Push to database">
+    ```bash
+    npm run db:push
+    ```
+    
+    Drizzle will show you the changes before applying them.
+  </Step>
+  
+  <Step title="Verify with Studio">
+    ```bash
+    npm run db:studio
+    ```
+    
+    Check that your tables were created correctly.
+  </Step>
+</Steps>
+
+### Production Workflow (Migrations)
+
+For production-ready deployments:
+
+<Steps>
+  <Step title="Make schema changes">
+    Edit `src/db/schema.ts` with your changes.
+  </Step>
+  
+  <Step title="Generate migration">
+    ```bash
+    npm run db:generate
+    ```
+    
+    This creates migration files in `src/db/migrations/`.
+  </Step>
+  
+  <Step title="Review migration SQL">
+    Open the generated `.sql` file and verify the migration logic:
+    
+    ```sql src/db/migrations/0001_add_post_table.sql
+    CREATE TABLE "post" (
+      "id" text PRIMARY KEY NOT NULL,
+      "title" text NOT NULL,
+      "content" text,
+      "user_id" text NOT NULL,
+      "created_at" timestamp NOT NULL
+    );
+    
+    ALTER TABLE "post" ADD CONSTRAINT "post_user_id_user_id_fk" 
+      FOREIGN KEY ("user_id") REFERENCES "user"("id") ON DELETE cascade;
+    ```
+  </Step>
+  
+  <Step title="Commit migration files">
+    ```bash
+    git add src/db/migrations/
+    git commit -m "Add post table migration"
+    ```
+  </Step>
+  
+  <Step title="Run migration">
+    On your production server:
+    
+    ```bash
+    npm run db:migrate
+    ```
+  </Step>
+</Steps>
+
+## When to Use Each Approach
+
+<Tabs>
+  <Tab title="Use db:push">
+    **Development scenarios:**
+    
+    - Local development and prototyping
+    - Experimenting with schema designs
+    - Personal projects without team collaboration
+    - When you don't need migration history
+    
+    **Advantages:**
+    - Instant feedback
+    - No migration files to manage
+    - Perfect for rapid iteration
+    
+    **Disadvantages:**
+    - No rollback capability
+    - No migration history
+    - Can't track what changed when
+  </Tab>
+  
+  <Tab title="Use Migrations">
+    **Production scenarios:**
+    
+    - Production deployments
+    - Team collaboration
+    - CI/CD pipelines
+    - When you need schema version control
+    - When you need rollback capability
+    
+    **Advantages:**
+    - Version controlled migrations
+    - Can be reviewed in pull requests
+    - Trackable history of changes
+    - Can be rolled back if needed
+    
+    **Disadvantages:**
+    - Extra step (generate then migrate)
+    - More files to manage
+    - Requires more discipline
+  </Tab>
+</Tabs>
+
+## Migration Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always review generated SQL">
+    Before running migrations in production, open the generated `.sql` file and verify:
+    
+    - The SQL does what you expect
+    - Foreign keys are correct
+    - Indexes are created where needed
+    - Data migrations won't cause data loss
+  </Accordion>
+  
+  <Accordion title="Test migrations locally first">
+    ```bash
+    # Generate migration
+    npm run db:generate
+    
+    # Test on local database
+    npm run db:migrate
+    
+    # Verify with Studio
+    npm run db:studio
+    ```
+  </Accordion>
+  
+  <Accordion title="Commit migrations with schema changes">
+    ```bash
+    git add src/db/schema.ts src/db/migrations/
+    git commit -m "Add posts table with user relationship"
+    ```
+    
+    This keeps schema and migrations in sync in version control.
+  </Accordion>
+  
+  <Accordion title="Run migrations in CI/CD">
+    Add to your deployment pipeline:
+    
+    ```yaml .github/workflows/deploy.yml
+    - name: Run database migrations
+      run: npm run db:migrate
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    ```
+  </Accordion>
+  
+  <Accordion title="Backup before production migrations">
+    Always backup your production database before applying migrations:
+    
+    ```bash
+    # Backup PostgreSQL
+    pg_dump $DATABASE_URL > backup_$(date +%Y%m%d_%H%M%S).sql
+    
+    # Then migrate
+    npm run db:migrate
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Migration fails with 'relation already exists'">
+    This usually means your database state doesn't match the migration history.
+    
+    **Solution:**
+    - For development: Drop the database and re-run all migrations
+    - For production: Manually adjust the migration or database state
+  </Accordion>
+  
+  <Accordion title="db:push shows no changes but schema is different">
+    Drizzle may not detect certain changes automatically.
+    
+    **Solution:**
+    - Use migrations instead of push for complex changes
+    - Verify your schema syntax is correct
+  </Accordion>
+  
+  <Accordion title="Cannot connect to database">
+    Check your `DATABASE_URL` environment variable.
+    
+    **Solution:**
+    ```bash
+    # Verify it's set
+    echo $DATABASE_URL
+    
+    # Should look like:
+    # postgresql://user:password@localhost:5432/dbname
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Adding Tables" icon="plus" href="/database/adding-tables">
+    Learn how to add custom tables to your schema
+  </Card>
+  <Card title="Schema Reference" icon="table" href="/database/schema">
+    View the complete database schema
+  </Card>
+  <Card title="Drizzle Docs" icon="book" href="https://orm.drizzle.team/docs/migrations">
+    Official migration documentation
+  </Card>
+</CardGroup>

@@ -1,0 +1,378 @@
+---
+title: API Clients
+description: Using the built-in API clients with automatic JWT authentication
+---
+
+The boilerplate includes two API client implementations for communicating with your backend. Both automatically handle JWT token injection and refresh.
+
+## Client Options
+
+<CardGroup cols={2}>
+  <Card title="Fetch-based Client" icon="bolt" href="#fetch-based-client">
+    Zero dependencies, lightweight, uses native fetch API
+  </Card>
+  <Card title="Axios-based Client" icon="gear" href="#axios-based-client">
+    Feature-rich with interceptors, cancel tokens, and progress events
+  </Card>
+</CardGroup>
+
+## Fetch-based Client
+
+The fetch-based client (`src/lib/api-client.ts`) uses the native Fetch API with manual token caching.
+
+### How It Works
+
+1. Client obtains JWT from Better Auth via `authClient.token()`
+2. JWT is cached in memory and reused until close to expiry (10s buffer)
+3. Each request includes JWT in `Authorization: Bearer <token>` header
+4. Backend verifies token using JWKS endpoint
+
+### Token Caching Logic
+
+```typescript src/lib/api-client.ts
+private isTokenValid(): boolean {
+  if (!this.cachedToken) {
+    return false
+  }
+
+  const jwt = decodeJwt(this.cachedToken)
+  if (!jwt.exp) {
+    return false
+  }
+
+  // Add a 10-second buffer to avoid using tokens about to expire
+  const currentTimeInSeconds = Math.floor(Date.now() / 1000)
+  return jwt.exp > currentTimeInSeconds + 10
+}
+
+private async getToken(): Promise<string | null> {
+  if (this.isTokenValid()) {
+    return this.cachedToken
+  }
+
+  // Request a new JWT from better-auth
+  const token = await authClient.token().then(x => x.data?.token) || null
+  this.cachedToken = token
+  return token
+}
+```
+
+<Info>
+The 10-second buffer ensures tokens are refreshed before they expire, preventing authentication failures during requests.
+</Info>
+
+### Basic Usage
+
+```typescript
+import { apiClient } from '@/lib/api-client'
+
+// The client automatically injects JWT tokens
+const response = await apiClient.verifyAuth()
+
+if (response.error) {
+  console.error('Error:', response.error)
+} else {
+  console.log('User:', response.data)
+}
+```
+
+### Making Custom Requests
+
+The `request` method is private, but you can extend the class:
+
+```typescript src/lib/api-client.ts
+class ApiClient {
+  // ... existing code ...
+
+  async getProfile(): Promise<ApiResponse<UserProfile>> {
+    return this.request("/api/users/me", {
+      method: "GET",
+    })
+  }
+
+  async updateProfile(data: Partial<UserProfile>): Promise<ApiResponse<UserProfile>> {
+    return this.request("/api/users/me", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    })
+  }
+
+  async createPost(title: string, content: string): Promise<ApiResponse<Post>> {
+    return this.request("/api/posts", {
+      method: "POST",
+      body: JSON.stringify({ title, content }),
+    })
+  }
+}
+```
+
+### Response Format
+
+All responses follow a consistent format:
+
+```typescript
+interface ApiResponse<T = unknown> {
+  data?: T        // Success: populated with response data
+  error?: string  // Error: populated with error message
+  status: number  // HTTP status code
+}
+```
+
+### Configuration
+
+Set the backend URL in your `.env` file:
+
+```bash .env
+NEXT_PUBLIC_BACKEND_API_URL=http://localhost:8080
+```
+
+## Axios-based Client
+
+The Axios client (`src/lib/api-client-axios.ts`) uses interceptors to automatically inject JWT tokens before each request.
+
+### How It Works
+
+1. Axios request interceptor fetches JWT before each request
+2. JWT is injected into `Authorization` header
+3. Response interceptor handles errors uniformly
+4. No manual token caching needed (Better Auth client handles it)
+
+### Request Interceptor
+
+```typescript src/lib/api-client-axios.ts
+this.axiosInstance.interceptors.request.use(
+  async (config) => {
+    const token = await authClient.token().then(x => x.data?.token)
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => {
+    return Promise.reject(error)
+  }
+)
+```
+
+### Response Interceptor
+
+```typescript src/lib/api-client-axios.ts
+this.axiosInstance.interceptors.response.use(
+  (response) => response,
+  (error: AxiosError) => {
+    // Handle specific status codes here (e.g., 401, 403)
+    return Promise.reject(error)
+  }
+)
+```
+
+<Tip>
+Extend the response interceptor to handle specific status codes, like refreshing tokens on 401 or showing toast notifications on errors.
+</Tip>
+
+### Basic Usage
+
+```typescript
+import { apiClientAxios } from '@/lib/api-client-axios'
+
+const response = await apiClientAxios.verifyAuth()
+
+if (response.error) {
+  console.error('Error:', response.error)
+} else {
+  console.log('User:', response.data)
+}
+```
+
+### Making Custom Requests
+
+Extend the class to add your own methods:
+
+```typescript src/lib/api-client-axios.ts
+class ApiClientAxios {
+  // ... existing code ...
+
+  async getProfile(): Promise<ApiResponse<UserProfile>> {
+    return this.request("/api/users/me", {
+      method: "GET",
+    })
+  }
+
+  async updateProfile(data: Partial<UserProfile>): Promise<ApiResponse<UserProfile>> {
+    return this.request("/api/users/me", {
+      method: "PUT",
+      data, // Axios uses 'data' instead of 'body'
+    })
+  }
+
+  async searchPosts(query: string): Promise<ApiResponse<Post[]>> {
+    return this.request("/api/posts/search", {
+      method: "GET",
+      params: { q: query }, // Axios automatically serializes query params
+    })
+  }
+}
+```
+
+## Choosing Between Clients
+
+<AccordionGroup>
+  <Accordion title="Use Fetch-based Client When...">
+    - You want zero external dependencies
+    - You prefer manual control over token caching
+    - Your app doesn't need advanced features like request cancellation
+    - You're building a lightweight application
+  </Accordion>
+
+  <Accordion title="Use Axios-based Client When...">
+    - You need request/response interceptors
+    - You want automatic JSON serialization
+    - You need request cancellation (cancel tokens)
+    - You want upload/download progress events
+    - You prefer Axios's API and error handling
+  </Accordion>
+</AccordionGroup>
+
+## Using Both Clients
+
+You can use both clients in the same project. The boilerplate includes both by default.
+
+```typescript components/api-test.tsx
+import { apiClient } from '@/lib/api-client'
+import { apiClientAxios } from '@/lib/api-client-axios'
+
+// Use fetch-based client
+const fetchResponse = await apiClient.verifyAuth()
+
+// Use Axios-based client
+const axiosResponse = await apiClientAxios.verifyAuth()
+```
+
+## Example: Building a Custom API Service
+
+Here's how to create a dedicated service for managing posts:
+
+```typescript lib/services/posts.ts
+import { apiClient } from '@/lib/api-client'
+import type { ApiResponse } from '@/lib/api-client'
+
+interface Post {
+  id: string
+  title: string
+  content: string
+  userId: string
+  createdAt: string
+}
+
+class PostsService {
+  async list(): Promise<ApiResponse<Post[]>> {
+    return apiClient.request('/api/posts', { method: 'GET' })
+  }
+
+  async get(id: string): Promise<ApiResponse<Post>> {
+    return apiClient.request(`/api/posts/${id}`, { method: 'GET' })
+  }
+
+  async create(title: string, content: string): Promise<ApiResponse<Post>> {
+    return apiClient.request('/api/posts', {
+      method: 'POST',
+      body: JSON.stringify({ title, content }),
+    })
+  }
+
+  async update(id: string, data: Partial<Post>): Promise<ApiResponse<Post>> {
+    return apiClient.request(`/api/posts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async delete(id: string): Promise<ApiResponse<void>> {
+    return apiClient.request(`/api/posts/${id}`, { method: 'DELETE' })
+  }
+}
+
+export const postsService = new PostsService()
+```
+
+Usage in a component:
+
+```typescript app/posts/page.tsx
+'use client'
+
+import { postsService } from '@/lib/services/posts'
+import { useEffect, useState } from 'react'
+
+export default function PostsPage() {
+  const [posts, setPosts] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function loadPosts() {
+      const response = await postsService.list()
+      if (response.data) {
+        setPosts(response.data)
+      }
+      setLoading(false)
+    }
+    loadPosts()
+  }, [])
+
+  if (loading) return <div>Loading...</div>
+
+  return (
+    <div>
+      <h1>Posts</h1>
+      {posts.map(post => (
+        <article key={post.id}>
+          <h2>{post.title}</h2>
+          <p>{post.content}</p>
+        </article>
+      ))}
+    </div>
+  )
+}
+```
+
+## Error Handling
+
+Both clients return errors in a consistent format:
+
+```typescript
+const response = await apiClient.verifyAuth()
+
+if (response.error) {
+  // Handle different status codes
+  switch (response.status) {
+    case 401:
+      // Redirect to login
+      window.location.href = '/login'
+      break
+    case 403:
+      // Show forbidden message
+      alert('You do not have permission to access this resource')
+      break
+    case 500:
+      // Show server error
+      alert('Server error, please try again later')
+      break
+    default:
+      // Generic error
+      alert(response.error)
+  }
+} else {
+  // Success
+  console.log(response.data)
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Backend Integration" icon="server" href="/backend/overview">
+    Learn how to verify JWTs in your backend
+  </Card>
+  <Card title="Project Structure" icon="folder-tree" href="/development/project-structure">
+    Understand the codebase organization
+  </Card>
+</CardGroup>

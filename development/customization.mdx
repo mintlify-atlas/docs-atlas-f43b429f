@@ -1,0 +1,420 @@
+---
+title: Customization
+description: Adapt the Auth UI Boilerplate for your application
+---
+
+The boilerplate includes demo components and documentation to help you understand how everything works. Once you're ready to build your app, strip the demo content and customize the foundation.
+
+## AI-Assisted Setup
+
+The fastest way to customize the boilerplate is using an AI coding assistant (Cursor, GitHub Copilot, Claude, etc.).
+
+### Cleanup Prompt
+
+After cloning, give this prompt to your AI assistant to remove demo components and create a clean starting point:
+
+```markdown
+I cloned the auth-ui-boilerplate. Strip all demo/boilerplate UI and turn this into a clean starting point for my app. Specifically:
+
+1. Remove demo components:
+   - Delete src/components/auth-status.tsx (auth status card)
+   - Delete src/components/api-test.tsx and src/components/api-test-axios.tsx (API test cards)
+
+2. Replace the homepage (src/app/page.tsx):
+   - Remove all demo content (How It Works, Backend Integration guide, Security Best Practices, Environment Variables, Project Structure, Credits sections)
+   - Keep the nav bar with the app name and theme toggle (remove the Lock icon and GitHub link)
+   - Remove all links from the footer (and remove the footer container as well)
+   - Wrap the page with the LoginRequired component from src/components/login-required.tsx so unauthenticated users are redirected to /login
+   - Add a simple welcome/dashboard layout that shows the authenticated user's name and a sign-out button (use authClient.useSession() from @/lib/auth-client)
+   - Make Sign Out button part of Navbar instead of the page content.
+
+3. Remove the Back button from Login & Signup pages:
+   - Remove the "Back" link and ArrowLeft icon from src/app/login/page.tsx
+   - Remove the "Back" link and ArrowLeft icon from src/app/signup/page.tsx
+
+4. Keep these files as-is (core infrastructure):
+   - src/lib/auth.ts and src/lib/auth-client.ts (Better Auth config)
+   - src/lib/api-client.ts and src/lib/api-client-axios.ts (API clients with JWT injection)
+   - src/app/api/auth/[...all]/route.ts (auth API handler)
+   - src/app/api/[...path]/route.ts (JWT-injecting API proxy)
+   - src/app/login/page.tsx and src/app/signup/page.tsx (auth pages — except the Back button removal above)
+   - src/db/ (Drizzle schema and migrations)
+   - src/components/ui/ (shadcn/ui primitives)
+   - src/components/theme-provider.tsx and src/components/theme-toggle.tsx
+   - src/components/fade-in.tsx
+   - src/components/login-required.tsx
+
+5. Update the app name:
+   - Ask me what my app name is before making any changes
+   - Then replace "Auth UI Boilerplate" with my app name in the nav, footer, and src/app/layout.tsx metadata
+
+6. Clean up unused imports after removing components.
+
+The result should compile with npm run build and show a minimal authenticated dashboard.
+```
+
+<Tip>
+Copy this entire prompt and paste it into your AI assistant. It will ask for your app name and handle all the cleanup automatically.
+</Tip>
+
+## Manual Customization
+
+If you prefer to customize manually, follow these steps:
+
+### 1. Remove Demo Components
+
+Delete the demo UI components:
+
+```bash
+rm src/components/auth-status.tsx
+rm src/components/api-test.tsx
+rm src/components/api-test-axios.tsx
+```
+
+### 2. Clean Up Homepage
+
+Replace `src/app/page.tsx` with a minimal authenticated dashboard:
+
+```tsx src/app/page.tsx
+'use client'
+
+import { authClient } from '@/lib/auth-client'
+import { LoginRequired } from '@/components/login-required'
+import { Button } from '@/components/ui/button'
+
+function Dashboard() {
+  const { data: session } = authClient.useSession()
+
+  return (
+    <div className="container mx-auto px-4 py-8">
+      <h1 className="text-3xl font-bold mb-4">
+        Welcome, {session?.user?.name || 'User'}!
+      </h1>
+      <p className="text-muted-foreground mb-8">
+        You're logged in as {session?.user?.email}
+      </p>
+      {/* Add your app content here */}
+    </div>
+  )
+}
+
+export default function Page() {
+  return (
+    <LoginRequired>
+      <Dashboard />
+    </LoginRequired>
+  )
+}
+```
+
+### 3. Update App Metadata
+
+Edit `src/app/layout.tsx` to update your app name and metadata:
+
+```tsx src/app/layout.tsx
+export const metadata: Metadata = {
+  title: "Your App Name",
+  description: "Your app description",
+}
+```
+
+### 4. Simplify Auth Pages (Optional)
+
+Remove the back button from login and signup pages by editing:
+- `src/app/login/page.tsx`
+- `src/app/signup/page.tsx`
+
+Delete the ArrowLeft import and the back button link at the top of each page.
+
+## Theming and UI Customization
+
+### Color Scheme
+
+The boilerplate uses CSS variables for theming. Edit `src/app/globals.css`:
+
+```css src/app/globals.css
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+    /* ... more color variables ... */
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    /* ... more color variables ... */
+  }
+}
+```
+
+<Info>
+Use the [shadcn/ui themes](https://ui.shadcn.com/themes) to generate custom color schemes.
+</Info>
+
+### Fonts
+
+Update fonts in `src/app/layout.tsx`:
+
+```tsx src/app/layout.tsx
+import { Inter, Roboto_Mono } from 'next/font/google'
+
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-sans',
+})
+
+const robotoMono = Roboto_Mono({
+  subsets: ['latin'],
+  variable: '--font-mono',
+})
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <body className={`${inter.variable} ${robotoMono.variable} font-sans`}>
+        {children}
+      </body>
+    </html>
+  )
+}
+```
+
+### Tailwind Configuration
+
+Customize Tailwind in `tailwind.config.ts`:
+
+```typescript tailwind.config.ts
+import type { Config } from 'tailwindcss'
+
+const config: Config = {
+  content: [
+    './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
+    './src/components/**/*.{js,ts,jsx,tsx,mdx}',
+    './src/app/**/*.{js,ts,jsx,tsx,mdx}',
+  ],
+  theme: {
+    extend: {
+      colors: {
+        // Add custom colors
+        brand: '#your-brand-color',
+      },
+      spacing: {
+        // Add custom spacing
+      },
+    },
+  },
+  plugins: [],
+}
+
+export default config
+```
+
+## Authentication Customization
+
+### Add Email Verification
+
+Enable email verification in `src/lib/auth.ts`:
+
+```typescript src/lib/auth.ts
+import { betterAuth } from "better-auth"
+import { drizzleAdapter } from "better-auth/adapters/drizzle"
+
+export const auth = betterAuth({
+  database: drizzleAdapter(db, { provider: "pg" }),
+  emailAndPassword: {
+    enabled: true,
+    requireEmailVerification: true, // Add this
+  },
+  emailVerification: {
+    sendOnSignUp: true,
+    sendVerificationEmail: async ({ user, url }) => {
+      // Send verification email
+      // Integrate with your email service (SendGrid, Resend, etc.)
+    },
+  },
+  // ... rest of config
+})
+```
+
+### Add More OAuth Providers
+
+Better Auth supports many providers. Add GitHub:
+
+```typescript src/lib/auth.ts
+export const auth = betterAuth({
+  // ... existing config ...
+  socialProviders: {
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    },
+    github: {
+      clientId: process.env.GITHUB_CLIENT_ID!,
+      clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+    },
+  },
+})
+```
+
+Then update your login/signup pages to include the GitHub button:
+
+```tsx app/login/page.tsx
+await authClient.signIn.social({
+  provider: 'github',
+  callbackURL: '/'
+})
+```
+
+### Configure Session Duration
+
+Adjust session expiration in `src/lib/auth.ts`:
+
+```typescript src/lib/auth.ts
+export const auth = betterAuth({
+  // ... existing config ...
+  session: {
+    expiresIn: 60 * 60 * 24 * 7, // 7 days (in seconds)
+    updateAge: 60 * 60 * 24, // Update session if older than 1 day
+  },
+})
+```
+
+## Database Customization
+
+### Add Custom User Fields
+
+Extend the user table in `src/db/schema.ts`:
+
+```typescript src/db/schema.ts
+export const user = pgTable("user", {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  emailVerified: boolean('email_verified').$defaultFn(() => false).notNull(),
+  image: text('image'),
+  createdAt: timestamp('created_at').$defaultFn(() => new Date()).notNull(),
+  updatedAt: timestamp('updated_at').$defaultFn(() => new Date()).notNull(),
+  // Add custom fields
+  role: text('role').$defaultFn(() => 'user').notNull(),
+  bio: text('bio'),
+  phoneNumber: text('phone_number'),
+})
+```
+
+Then push changes:
+
+```bash
+npm run db:push
+```
+
+### Add Application Tables
+
+Create tables for your app domain:
+
+```typescript src/db/schema.ts
+export const post = pgTable("post", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  published: boolean("published").$defaultFn(() => false).notNull(),
+  createdAt: timestamp("created_at").$defaultFn(() => new Date()).notNull(),
+  updatedAt: timestamp("updated_at").$defaultFn(() => new Date()).notNull(),
+})
+
+export const comment = pgTable("comment", {
+  id: text("id").primaryKey(),
+  content: text("content").notNull(),
+  postId: text("post_id").notNull().references(() => post.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").$defaultFn(() => new Date()).notNull(),
+})
+```
+
+## Adding shadcn/ui Components
+
+The boilerplate includes a few shadcn/ui components. Add more as needed:
+
+```bash
+npx shadcn@latest add dropdown-menu
+npx shadcn@latest add dialog
+npx shadcn@latest add toast
+npx shadcn@latest add form
+```
+
+<Info>
+Browse all available components at [ui.shadcn.com/docs/components](https://ui.shadcn.com/docs/components).
+</Info>
+
+## Protected Routes
+
+Use the `LoginRequired` component to protect any page:
+
+```tsx app/dashboard/page.tsx
+import { LoginRequired } from '@/components/login-required'
+
+export default function DashboardPage() {
+  return (
+    <LoginRequired>
+      <div>Protected dashboard content</div>
+    </LoginRequired>
+  )
+}
+```
+
+Or check authentication in Server Components:
+
+```tsx app/admin/page.tsx
+import { auth } from '@/lib/auth'
+import { headers } from 'next/headers'
+import { redirect } from 'next/navigation'
+
+export default async function AdminPage() {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  })
+
+  if (!session) {
+    redirect('/login')
+  }
+
+  return <div>Admin panel</div>
+}
+```
+
+## Environment-Specific Configuration
+
+Use different configuration for development vs. production:
+
+```typescript lib/config.ts
+const isDev = process.env.NODE_ENV === 'development'
+
+export const config = {
+  apiUrl: isDev 
+    ? 'http://localhost:8080' 
+    : process.env.NEXT_PUBLIC_BACKEND_API_URL,
+  features: {
+    analytics: !isDev,
+    debugMode: isDev,
+  },
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Clients" icon="code" href="/development/api-clients">
+    Learn how to use the built-in API clients
+  </Card>
+  <Card title="Database" icon="database" href="/database/overview">
+    Add tables and query your database
+  </Card>
+  <Card title="Project Structure" icon="folder-tree" href="/development/project-structure">
+    Understand the codebase organization
+  </Card>
+</CardGroup>

@@ -1,0 +1,380 @@
+---
+title: 'Fetch-based API Client'
+description: 'A lightweight, zero-dependency API client with automatic JWT token management and caching'
+---
+
+## Overview
+
+The `ApiClient` class provides a fetch-based HTTP client for communicating with external backend services. It automatically manages JWT bearer tokens issued by better-auth, including intelligent caching with a 10-second expiration buffer.
+
+**Key Features:**
+- Zero external dependencies (uses native fetch)
+- Automatic JWT token injection and caching
+- 10-second expiration buffer to prevent expired token usage
+- Standardized error handling
+- Type-safe response wrapper
+
+## How It Works
+
+1. The client obtains a JWT from better-auth via `authClient.token()`
+2. The JWT is cached in memory and reused until it's close to expiry (10s buffer)
+3. Each request includes the JWT in the `Authorization: Bearer <token>` header
+4. Your backend service verifies this token using the JWKS endpoint exposed by better-auth at `/api/auth/jwks`
+
+## Configuration
+
+Set the backend API URL using an environment variable:
+
+```bash .env.local
+NEXT_PUBLIC_BACKEND_API_URL=https://api.example.com
+```
+
+Defaults to `http://localhost:8080` for local development.
+
+## JWT Token Caching
+
+The client implements intelligent token caching to minimize requests to the auth server:
+
+- Tokens are cached in memory after the first request
+- Before each request, the client checks if the cached token is still valid
+- A **10-second buffer** is added to the expiration check to prevent using tokens that are about to expire
+- If the token is expired or within 10 seconds of expiration, a fresh token is automatically fetched
+
+**Example token validation logic:**
+
+```typescript
+private isTokenValid(): boolean {
+  if (!this.cachedToken) {
+    return false
+  }
+
+  const jwt = decodeJwt(this.cachedToken)
+  if (!jwt.exp) {
+    return false
+  }
+
+  // Add a 10-second buffer to avoid using tokens that are about to expire
+  const currentTimeInSeconds = Math.floor(Date.now() / 1000)
+  return jwt.exp > currentTimeInSeconds + 10
+}
+```
+
+## Usage
+
+### Basic Import
+
+```typescript
+import { apiClient } from '@/lib/api-client'
+```
+
+### Making Authenticated Requests
+
+The client exposes a private `request()` method that's used internally. For your own endpoints, you can extend the `ApiClient` class or use the exported instance:
+
+```typescript
+// Using the verifyAuth example method
+const result = await apiClient.verifyAuth()
+
+if (result.error) {
+  console.error('Verification failed:', result.error)
+} else {
+  console.log('User verified:', result.data)
+}
+```
+
+### Extending the Client
+
+Add your own API methods by extending the class:
+
+```typescript
+import { ApiClient, ApiResponse } from '@/lib/api-client'
+
+class MyApiClient extends ApiClient {
+  async getUserProfile(userId: string): Promise<ApiResponse<UserProfile>> {
+    return this.request(`/api/users/${userId}`, {
+      method: 'GET',
+    })
+  }
+
+  async updateUserProfile(
+    userId: string,
+    data: Partial<UserProfile>
+  ): Promise<ApiResponse<UserProfile>> {
+    return this.request(`/api/users/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async createPost(content: string): Promise<ApiResponse<Post>> {
+    return this.request('/api/posts', {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    })
+  }
+}
+
+export const myApiClient = new MyApiClient()
+```
+
+## ApiClient Class
+
+### Constructor
+
+```typescript
+const client = new ApiClient(baseUrl?: string)
+```
+
+<ParamField path="baseUrl" type="string" optional>
+  The base URL for your backend API service. Defaults to the value of `NEXT_PUBLIC_BACKEND_API_URL` or `http://localhost:8080`.
+</ParamField>
+
+### Methods
+
+#### request()
+
+Makes an authenticated HTTP request to the backend. Automatically injects the JWT bearer token into the Authorization header.
+
+```typescript
+private async request<T = unknown>(
+  endpoint: string,
+  options?: RequestInit
+): Promise<ApiResponse<T>>
+```
+
+<ParamField path="endpoint" type="string" required>
+  The API path (e.g., `/api/users/me`). This is appended to the base URL.
+</ParamField>
+
+<ParamField path="options" type="RequestInit" optional>
+  Standard fetch `RequestInit` options including method, body, headers, etc. Headers are merged with default headers (Content-Type and Authorization).
+</ParamField>
+
+<ResponseField name="data" type="T" optional>
+  The parsed JSON response data. Only present if the request was successful.
+</ResponseField>
+
+<ResponseField name="error" type="string" optional>
+  An error message if the request failed. Contains either the API error message or a client-side error description.
+</ResponseField>
+
+<ResponseField name="status" type="number">
+  The HTTP status code. Returns `0` if the request failed before reaching the server.
+</ResponseField>
+
+#### verifyAuth()
+
+Example method that verifies the current user's authentication against the backend.
+
+```typescript
+async verifyAuth(): Promise<ApiResponse<AuthVerifyResponse>>
+```
+
+<ResponseField name="data.valid" type="boolean">
+  Whether the authentication token is valid.
+</ResponseField>
+
+<ResponseField name="data.userId" type="string" optional>
+  The authenticated user's ID, if valid.
+</ResponseField>
+
+<ResponseField name="data.email" type="string" optional>
+  The authenticated user's email, if valid.
+</ResponseField>
+
+#### getToken()
+
+Retrieves a valid JWT token, using the cache when possible.
+
+```typescript
+private async getToken(): Promise<string | null>
+```
+
+This method:
+1. Checks if the cached token is still valid (using `isTokenValid()`)
+2. Returns the cached token if valid
+3. Requests a new JWT from better-auth if the cache is expired or empty
+4. Updates the cache with the new token
+5. Returns the token or `null` if authentication failed
+
+## Types
+
+### ApiResponse\<T\>
+
+Standard API response wrapper with typed data or error.
+
+```typescript
+interface ApiResponse<T = unknown> {
+  data?: T
+  error?: string
+  status: number
+}
+```
+
+<ResponseField name="data" type="T" optional>
+  The response data. Type parameter `T` allows for type-safe responses.
+</ResponseField>
+
+<ResponseField name="error" type="string" optional>
+  Error message if the request failed. Mutually exclusive with `data`.
+</ResponseField>
+
+<ResponseField name="status" type="number">
+  HTTP status code. Returns `0` for network errors or exceptions.
+</ResponseField>
+
+### UserProfile
+
+Example user profile shape. Adjust to match your backend schema.
+
+```typescript
+interface UserProfile {
+  id: string
+  email: string
+  name: string
+}
+```
+
+<ResponseField name="id" type="string">
+  Unique user identifier.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  User's email address.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  User's display name.
+</ResponseField>
+
+### AuthVerifyResponse
+
+Example auth verification response. Adjust to match your backend schema.
+
+```typescript
+interface AuthVerifyResponse {
+  valid: boolean
+  userId?: string
+  email?: string
+}
+```
+
+<ResponseField name="valid" type="boolean">
+  Whether the JWT token is valid.
+</ResponseField>
+
+<ResponseField name="userId" type="string" optional>
+  The authenticated user's ID if the token is valid.
+</ResponseField>
+
+<ResponseField name="email" type="string" optional>
+  The authenticated user's email if the token is valid.
+</ResponseField>
+
+## Complete Example
+
+Here's a complete example showing how to create a custom API client with multiple endpoints:
+
+```typescript
+import { ApiClient, ApiResponse, UserProfile } from '@/lib/api-client'
+
+interface Post {
+  id: string
+  userId: string
+  content: string
+  createdAt: string
+}
+
+interface CreatePostRequest {
+  content: string
+  tags?: string[]
+}
+
+class BlogApiClient extends ApiClient {
+  // Get current user profile
+  async getMe(): Promise<ApiResponse<UserProfile>> {
+    return this.request('/api/users/me', {
+      method: 'GET',
+    })
+  }
+
+  // Get all posts
+  async getPosts(): Promise<ApiResponse<Post[]>> {
+    return this.request('/api/posts', {
+      method: 'GET',
+    })
+  }
+
+  // Create a new post
+  async createPost(data: CreatePostRequest): Promise<ApiResponse<Post>> {
+    return this.request('/api/posts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  // Update a post
+  async updatePost(
+    postId: string,
+    data: Partial<CreatePostRequest>
+  ): Promise<ApiResponse<Post>> {
+    return this.request(`/api/posts/${postId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    })
+  }
+
+  // Delete a post
+  async deletePost(postId: string): Promise<ApiResponse<void>> {
+    return this.request(`/api/posts/${postId}`, {
+      method: 'DELETE',
+    })
+  }
+}
+
+export const blogApi = new BlogApiClient()
+
+// Usage in a component or server action
+async function handleCreatePost(content: string) {
+  const result = await blogApi.createPost({ content })
+
+  if (result.error) {
+    console.error('Failed to create post:', result.error)
+    return null
+  }
+
+  console.log('Post created:', result.data)
+  return result.data
+}
+```
+
+## Security Notes
+
+- Tokens are short-lived JWTs signed with the server's private key (Ed25519 by default)
+- The backend should always validate the token signature via JWKS, not just decode it
+- In production, always use HTTPS for both the auth server and the backend
+- The token cache is stored in memory only and is cleared when the page reloads
+- Never log or expose JWT tokens in client-side code
+
+## Comparison with Axios Client
+
+| Feature | Fetch Client | Axios Client |
+|---------|--------------|---------------|
+| Dependencies | Zero (native fetch) | Requires axios package |
+| Token Caching | Manual with 10s buffer | Delegated to better-auth |
+| Interceptors | Not available | Request/response interceptors |
+| Bundle Size | Smaller | Larger |
+| Browser Support | Modern browsers | Wider compatibility |
+| Cancel Tokens | AbortController | Built-in |
+| Progress Events | Limited | Full support |
+
+Use the fetch-based client for:
+- Minimal bundle size
+- Modern browser-only apps
+- Simple request/response patterns
+
+Use the [axios-based client](/api/axios-client) for:
+- Advanced interceptor patterns
+- Upload/download progress tracking
+- Request cancellation
+- Older browser support

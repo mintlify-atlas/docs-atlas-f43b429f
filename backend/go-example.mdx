@@ -1,0 +1,511 @@
+---
+title: Go Backend Example
+description: Complete guide to JWT verification in Go using github.com/lestrrat-go/jwx
+---
+
+This guide shows how to verify Better Auth JWTs in a Go backend using the `github.com/lestrrat-go/jwx` library.
+
+## Installation
+
+Install the required dependency:
+
+```bash
+go get github.com/lestrrat-go/jwx/v3
+```
+
+This library provides:
+- JWKS fetching and caching
+- JWT parsing and verification
+- Support for Ed25519, RSA, and ECDSA algorithms
+
+## Basic Example
+
+Here's a complete example of extracting and verifying a user from an HTTP request:
+
+```go auth/verify.go
+package auth
+
+import (
+    "context"
+    "errors"
+    "fmt"
+    "net/http"
+
+    "github.com/lestrrat-go/jwx/v3/jwk"
+    "github.com/lestrrat-go/jwx/v3/jwt"
+)
+
+type User struct {
+    ID    string
+    Email string
+    Name  string
+}
+
+var (
+    ErrMissingUserID = errors.New("missing user id")
+)
+
+func UserFromRequest(r *http.Request) (User, error) {
+    // Fetch JWKS from Better Auth (automatically cached)
+    keyset, err := jwk.Fetch(r.Context(), "http://localhost:3000/api/auth/jwks")
+    if err != nil {
+        return User{}, fmt.Errorf("fetch jwks: %w", err)
+    }
+
+    // Parse and verify JWT from Authorization header
+    token, err := jwt.ParseRequest(r, jwt.WithKeySet(keyset))
+    if err != nil {
+        return User{}, fmt.Errorf("parse request: %w", err)
+    }
+
+    // Extract user ID from subject claim
+    userID, exists := token.Subject()
+    if !exists {
+        return User{}, ErrMissingUserID
+    }
+
+    // Extract custom claims
+    var email string
+    var name string
+
+    token.Get("email", &email)
+    token.Get("name", &name)
+
+    return User{
+        ID:    userID,
+        Email: email,
+        Name:  name,
+    }, nil
+}
+```
+
+## HTTP Handler Example
+
+Use the verification logic in an HTTP handler:
+
+```go handlers/profile.go
+package handlers
+
+import (
+    "encoding/json"
+    "net/http"
+    "yourapp/auth"
+)
+
+func ProfileHandler(w http.ResponseWriter, r *http.Request) {
+    user, err := auth.UserFromRequest(r)
+    if err != nil {
+        http.Error(w, "Unauthorized", http.StatusUnauthorized)
+        return
+    }
+
+    response := map[string]string{
+        "id":    user.ID,
+        "email": user.Email,
+        "name":  user.Name,
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(response)
+}
+```
+
+## Middleware Pattern
+
+Create reusable middleware to protect routes:
+
+```go middleware/auth.go
+package middleware
+
+import (
+    "context"
+    "net/http"
+    "yourapp/auth"
+)
+
+type contextKey string
+
+const UserContextKey contextKey = "user"
+
+// RequireAuth is middleware that verifies JWT and adds user to context
+func RequireAuth(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        user, err := auth.UserFromRequest(r)
+        if err != nil {
+            http.Error(w, "Unauthorized", http.StatusUnauthorized)
+            return
+        }
+
+        // Add user to request context
+        ctx := context.WithValue(r.Context(), UserContextKey, user)
+        next.ServeHTTP(w, r.WithContext(ctx))
+    })
+}
+
+// GetUser extracts the authenticated user from the request context
+func GetUser(r *http.Request) (auth.User, bool) {
+    user, ok := r.Context().Value(UserContextKey).(auth.User)
+    return user, ok
+}
+```
+
+Use the middleware in your router:
+
+```go main.go
+package main
+
+import (
+    "net/http"
+    "yourapp/handlers"
+    "yourapp/middleware"
+)
+
+func main() {
+    mux := http.NewServeMux()
+
+    // Public routes
+    mux.HandleFunc("/health", handlers.HealthHandler)
+
+    // Protected routes
+    mux.Handle("/api/me", middleware.RequireAuth(
+        http.HandlerFunc(handlers.ProfileHandler),
+    ))
+
+    mux.Handle("/api/posts", middleware.RequireAuth(
+        http.HandlerFunc(handlers.PostsHandler),
+    ))
+
+    http.ListenAndServe(":8080", mux)
+}
+```
+
+## Production Configuration
+
+For production, use environment variables for the JWKS URL:
+
+```go config/config.go
+package config
+
+import "os"
+
+type Config struct {
+    JWKSUrl      string
+    Port         string
+    Issuer       string
+    Audience     string
+}
+
+func Load() Config {
+    return Config{
+        JWKSUrl:  getEnv("BETTER_AUTH_URL", "http://localhost:3000") + "/api/auth/jwks",
+        Port:     getEnv("PORT", "8080"),
+        Issuer:   getEnv("BETTER_AUTH_URL", "http://localhost:3000"),
+        Audience: getEnv("BETTER_AUTH_URL", "http://localhost:3000"),
+    }
+}
+
+func getEnv(key, defaultValue string) string {
+    if value := os.Getenv(key); value != "" {
+        return value
+    }
+    return defaultValue
+}
+```
+
+Update your auth package to use the config:
+
+```go auth/verify.go
+package auth
+
+import (
+    "context"
+    "errors"
+    "fmt"
+    "net/http"
+    "yourapp/config"
+
+    "github.com/lestrrat-go/jwx/v3/jwk"
+    "github.com/lestrrat-go/jwx/v3/jwt"
+)
+
+type User struct {
+    ID    string
+    Email string
+    Name  string
+}
+
+var (
+    ErrMissingUserID     = errors.New("missing user id")
+    ErrInvalidIssuer     = errors.New("invalid issuer")
+    ErrInvalidAudience   = errors.New("invalid audience")
+)
+
+type Verifier struct {
+    config config.Config
+}
+
+func NewVerifier(cfg config.Config) *Verifier {
+    return &Verifier{config: cfg}
+}
+
+func (v *Verifier) UserFromRequest(r *http.Request) (User, error) {
+    keyset, err := jwk.Fetch(r.Context(), v.config.JWKSUrl)
+    if err != nil {
+        return User{}, fmt.Errorf("fetch jwks: %w", err)
+    }
+
+    token, err := jwt.ParseRequest(
+        r,
+        jwt.WithKeySet(keyset),
+        jwt.WithIssuer(v.config.Issuer),
+        jwt.WithAudience(v.config.Audience),
+    )
+    if err != nil {
+        return User{}, fmt.Errorf("parse request: %w", err)
+    }
+
+    userID, exists := token.Subject()
+    if !exists {
+        return User{}, ErrMissingUserID
+    }
+
+    var email string
+    var name string
+
+    token.Get("email", &email)
+    token.Get("name", &name)
+
+    return User{
+        ID:    userID,
+        Email: email,
+        Name:  name,
+    }, nil
+}
+```
+
+## Error Handling
+
+Handle different error cases appropriately:
+
+```go handlers/profile.go
+package handlers
+
+import (
+    "encoding/json"
+    "errors"
+    "log"
+    "net/http"
+    "yourapp/auth"
+
+    "github.com/lestrrat-go/jwx/v3/jwt"
+)
+
+type ErrorResponse struct {
+    Error string `json:"error"`
+}
+
+func ProfileHandler(verifier *auth.Verifier) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        user, err := verifier.UserFromRequest(r)
+        if err != nil {
+            handleAuthError(w, err)
+            return
+        }
+
+        response := map[string]string{
+            "id":    user.ID,
+            "email": user.Email,
+            "name":  user.Name,
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(response)
+    }
+}
+
+func handleAuthError(w http.ResponseWriter, err error) {
+    var response ErrorResponse
+    status := http.StatusUnauthorized
+
+    switch {
+    case errors.Is(err, jwt.ErrTokenExpired()):
+        response.Error = "Token expired"
+    case errors.Is(err, auth.ErrMissingUserID):
+        response.Error = "Invalid token: missing user ID"
+    case errors.Is(err, auth.ErrInvalidIssuer):
+        response.Error = "Invalid token: wrong issuer"
+    case errors.Is(err, auth.ErrInvalidAudience):
+        response.Error = "Invalid token: wrong audience"
+    default:
+        log.Printf("Auth error: %v", err)
+        response.Error = "Unauthorized"
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(status)
+    json.NewEncoder(w).Encode(response)
+}
+```
+
+## Complete Example Server
+
+Here's a complete server implementation:
+
+```go main.go
+package main
+
+import (
+    "encoding/json"
+    "log"
+    "net/http"
+    "yourapp/auth"
+    "yourapp/config"
+    "yourapp/middleware"
+)
+
+func main() {
+    // Load configuration
+    cfg := config.Load()
+    verifier := auth.NewVerifier(cfg)
+
+    // Setup router
+    mux := http.NewServeMux()
+
+    // Public routes
+    mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+        json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+    })
+
+    // Protected routes
+    authMiddleware := middleware.NewAuthMiddleware(verifier)
+    
+    mux.Handle("/api/me", authMiddleware.RequireAuth(
+        http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            user, _ := middleware.GetUser(r)
+            json.NewEncoder(w).Encode(user)
+        }),
+    ))
+
+    // Start server
+    log.Printf("Server listening on :%s", cfg.Port)
+    log.Printf("JWKS URL: %s", cfg.JWKSUrl)
+    
+    if err := http.ListenAndServe(":"+cfg.Port, mux); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+## Testing
+
+Test your JWT verification:
+
+```go auth/verify_test.go
+package auth
+
+import (
+    "net/http"
+    "net/http/httptest"
+    "testing"
+    "yourapp/config"
+)
+
+func TestUserFromRequest_ValidToken(t *testing.T) {
+    cfg := config.Config{
+        JWKSUrl:  "http://localhost:3000/api/auth/jwks",
+        Issuer:   "http://localhost:3000",
+        Audience: "http://localhost:3000",
+    }
+    verifier := NewVerifier(cfg)
+
+    req := httptest.NewRequest("GET", "/api/me", nil)
+    req.Header.Set("Authorization", "Bearer YOUR_TEST_TOKEN")
+
+    user, err := verifier.UserFromRequest(req)
+    if err != nil {
+        t.Fatalf("Expected no error, got %v", err)
+    }
+
+    if user.ID == "" {
+        t.Error("Expected user ID to be set")
+    }
+}
+
+func TestUserFromRequest_MissingToken(t *testing.T) {
+    cfg := config.Config{
+        JWKSUrl:  "http://localhost:3000/api/auth/jwks",
+        Issuer:   "http://localhost:3000",
+        Audience: "http://localhost:3000",
+    }
+    verifier := NewVerifier(cfg)
+
+    req := httptest.NewRequest("GET", "/api/me", nil)
+
+    _, err := verifier.UserFromRequest(req)
+    if err == nil {
+        t.Error("Expected error for missing token")
+    }
+}
+```
+
+## Environment Variables
+
+Create a `.env` file for development:
+
+```bash .env
+BETTER_AUTH_URL=http://localhost:3000
+PORT=8080
+```
+
+For production:
+
+```bash
+BETTER_AUTH_URL=https://auth.yourdomain.com
+PORT=8080
+```
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="'invalid signature' error">
+    Ensure the JWKS URL is correct and matches your Better Auth instance:
+    
+    ```go
+    // Check that this URL is accessible
+    keyset, err := jwk.Fetch(ctx, "http://localhost:3000/api/auth/jwks")
+    ```
+    
+    Test the JWKS endpoint:
+    ```bash
+    curl http://localhost:3000/api/auth/jwks
+    ```
+  </Accordion>
+  
+  <Accordion title="'token expired' error">
+    JWTs have a limited lifetime. Ensure your frontend refreshes tokens before they expire. The `api-client.ts` handles this automatically with a 10-second buffer.
+  </Accordion>
+  
+  <Accordion title="Missing user claims (email, name)">
+    Use `token.Get()` to extract custom claims:
+    
+    ```go
+    var email string
+    var name string
+    
+    token.Get("email", &email)
+    token.Get("name", &name)
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Python Example" icon="python" href="/backend/python-example">
+    See how to implement JWT verification in Python with Flask
+  </Card>
+  
+  <Card title="Express Example" icon="node-js" href="/backend/express-example">
+    Learn how to verify JWTs in Express.js with jose
+  </Card>
+</CardGroup>

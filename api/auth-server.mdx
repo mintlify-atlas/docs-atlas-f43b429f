@@ -1,0 +1,490 @@
+---
+title: "Auth Server"
+description: "Server-side authentication configuration and API"
+---
+
+## Overview
+
+The `auth` object is a Better Auth server instance that handles authentication, session management, and JWT token issuance. It's configured with Drizzle ORM for database persistence and supports email/password and OAuth authentication.
+
+## Configuration
+
+```typescript
+import { betterAuth } from "better-auth"
+import { drizzleAdapter } from "better-auth/adapters/drizzle"
+import { jwt } from "better-auth/plugins"
+import { db } from "@/db"
+
+export const auth = betterAuth({
+  database: drizzleAdapter(db, {
+    provider: "pg",
+  }),
+  emailAndPassword: {
+    enabled: true,
+  },
+  socialProviders: {
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID as string,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+    },
+  },
+  plugins: [jwt()],
+  baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
+})
+```
+
+## Configuration Options
+
+### database
+
+Database adapter configuration using Drizzle ORM.
+
+<ParamField path="database" type="DrizzleAdapter" required>
+  Drizzle adapter instance configured with your database connection
+</ParamField>
+
+```typescript
+import { drizzleAdapter } from "better-auth/adapters/drizzle"
+import { db } from "@/db"
+
+database: drizzleAdapter(db, {
+  provider: "pg",
+})
+```
+
+<ParamField path="provider" type="string" required>
+  Database provider. Supported values: `"pg"` (PostgreSQL), `"mysql"`, `"sqlite"`
+</ParamField>
+
+#### Drizzle Integration
+
+The Drizzle adapter automatically manages these tables:
+
+- `user` - User accounts and profiles
+- `session` - Active user sessions
+- `account` - OAuth account links
+- `verification` - Email verification tokens
+- `jwks` - JSON Web Key Sets for JWT signing
+
+Schema is defined in `src/db/schema.ts` and synced using:
+
+```bash
+npm run db:push       # Push schema to database (dev)
+npm run db:generate   # Generate migration files
+npm run db:migrate    # Run migrations
+```
+
+### emailAndPassword
+
+Enable email and password authentication.
+
+<ParamField path="emailAndPassword.enabled" type="boolean" default="false">
+  Set to `true` to enable email/password sign-in and sign-up
+</ParamField>
+
+```typescript
+emailAndPassword: {
+  enabled: true,
+}
+```
+
+When enabled, users can:
+- Sign up with `authClient.signUp.email({ email, password, name })`
+- Sign in with `authClient.signIn.email({ email, password })`
+
+### socialProviders
+
+Configure OAuth social providers.
+
+<ParamField path="socialProviders" type="object">
+  Object containing OAuth provider configurations
+</ParamField>
+
+#### Google OAuth
+
+```typescript
+socialProviders: {
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID as string,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+  },
+}
+```
+
+<ParamField path="google.clientId" type="string" required>
+  Google OAuth 2.0 client ID from [Google Cloud Console](https://console.cloud.google.com/)
+</ParamField>
+
+<ParamField path="google.clientSecret" type="string" required>
+  Google OAuth 2.0 client secret from [Google Cloud Console](https://console.cloud.google.com/)
+</ParamField>
+
+Set these values in your `.env` file:
+
+```bash
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-client-secret
+```
+
+#### Adding More Providers
+
+Better Auth supports multiple OAuth providers:
+
+```typescript
+socialProviders: {
+  google: { /* ... */ },
+  github: {
+    clientId: process.env.GITHUB_CLIENT_ID as string,
+    clientSecret: process.env.GITHUB_CLIENT_SECRET as string,
+  },
+  discord: {
+    clientId: process.env.DISCORD_CLIENT_ID as string,
+    clientSecret: process.env.DISCORD_CLIENT_SECRET as string,
+  },
+}
+```
+
+### plugins
+
+Array of Better Auth plugins to extend functionality.
+
+<ParamField path="plugins" type="array">
+  Array of plugin instances
+</ParamField>
+
+#### JWT Plugin
+
+The `jwt()` plugin enables JWT token issuance and JWKS endpoints:
+
+```typescript
+import { jwt } from "better-auth/plugins"
+
+plugins: [jwt()]
+```
+
+This provides:
+- `/api/auth/token` - Issue JWT tokens
+- `/api/auth/jwks` - JWKS public keys for verification
+- Token signing with Ed25519 or RS256 algorithms
+
+### baseURL
+
+<ParamField path="baseURL" type="string" required>
+  The base URL where your auth server is accessible. Used for OAuth callbacks and token validation.
+</ParamField>
+
+```typescript
+baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000"
+```
+
+Set via environment variable:
+
+```bash
+BETTER_AUTH_URL=http://localhost:3000
+```
+
+In production, use your public URL:
+
+```bash
+BETTER_AUTH_URL=https://yourdomain.com
+```
+
+## API Endpoints
+
+Better Auth automatically provides REST API endpoints through the Next.js API route at `src/app/api/auth/[...all]/route.ts`:
+
+```typescript
+import { auth } from "@/lib/auth"
+import { toNextJsHandler } from "better-auth/next-js"
+
+export const { GET, POST } = toNextJsHandler(auth)
+```
+
+### Available Endpoints
+
+#### POST /api/auth/sign-in/email
+
+Sign in with email and password.
+
+**Request:**
+```json
+{
+  "email": "user@example.com",
+  "password": "password123"
+}
+```
+
+**Response:**
+```json
+{
+  "user": {
+    "id": "user-id",
+    "email": "user@example.com",
+    "name": "User Name"
+  },
+  "session": {
+    "token": "session-token"
+  }
+}
+```
+
+#### POST /api/auth/sign-up/email
+
+Create a new account with email and password.
+
+**Request:**
+```json
+{
+  "email": "user@example.com",
+  "password": "password123",
+  "name": "User Name"
+}
+```
+
+#### GET /api/auth/sign-in/google
+
+Initiate Google OAuth flow. Redirects to Google sign-in.
+
+#### GET /api/auth/callback/google
+
+Google OAuth callback endpoint. Handles the OAuth response.
+
+#### POST /api/auth/sign-out
+
+Sign out the current user and invalidate their session.
+
+#### GET /api/auth/session
+
+Get the current session information.
+
+**Response:**
+```json
+{
+  "user": {
+    "id": "user-id",
+    "email": "user@example.com",
+    "name": "User Name"
+  }
+}
+```
+
+#### GET /api/auth/token
+
+Issue a JWT token for the current session.
+
+**Response:**
+```json
+{
+  "token": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+#### GET /api/auth/jwks
+
+Get JSON Web Key Set for JWT verification.
+
+**Response:**
+```json
+{
+  "keys": [
+    {
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "x": "base64-encoded-public-key",
+      "kid": "key-id",
+      "use": "sig"
+    }
+  ]
+}
+```
+
+## Server-Side Methods
+
+The `auth` object provides server-side methods for authentication operations.
+
+### auth.api.getToken()
+
+Generate a JWT token for a user session (server-side).
+
+```typescript
+import { auth } from "@/lib/auth"
+
+const token = await auth.api.getToken({ 
+  userId: "user-id" 
+})
+```
+
+### auth.api.getSession()
+
+Get session information from a request (server-side).
+
+```typescript
+import { auth } from "@/lib/auth"
+import { headers } from "next/headers"
+
+export async function GET(request: Request) {
+  const session = await auth.api.getSession({ 
+    headers: await headers() 
+  })
+  
+  if (!session) {
+    return new Response("Unauthorized", { status: 401 })
+  }
+  
+  return Response.json({ user: session.user })
+}
+```
+
+## Environment Variables
+
+Required environment variables for auth server configuration:
+
+<ParamField path="DATABASE_URL" type="string" required>
+  PostgreSQL connection string
+  
+  Example: `postgresql://user:password@localhost:5432/database`
+</ParamField>
+
+<ParamField path="BETTER_AUTH_SECRET" type="string" required>
+  Secret key for signing tokens and cookies. Generate a secure random string.
+  
+  Example: `openssl rand -base64 32`
+</ParamField>
+
+<ParamField path="BETTER_AUTH_URL" type="string" required>
+  Base URL of your auth server
+  
+  Development: `http://localhost:3000`
+  
+  Production: `https://yourdomain.com`
+</ParamField>
+
+<ParamField path="GOOGLE_CLIENT_ID" type="string">
+  Google OAuth client ID (required if using Google OAuth)
+</ParamField>
+
+<ParamField path="GOOGLE_CLIENT_SECRET" type="string">
+  Google OAuth client secret (required if using Google OAuth)
+</ParamField>
+
+### Example .env File
+
+```bash
+# Database
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/auth_db
+
+# Better Auth
+BETTER_AUTH_SECRET=your-secret-key-here
+BETTER_AUTH_URL=http://localhost:3000
+
+# Google OAuth
+GOOGLE_CLIENT_ID=123456789.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+```
+
+## JWT Verification (Backend)
+
+Backend services can verify JWT tokens using the JWKS endpoint. Here are examples in different languages:
+
+### Go (using jwx)
+
+```go
+import (
+    "github.com/lestrrat-go/jwx/v3/jwk"
+    "github.com/lestrrat-go/jwx/v3/jwt"
+)
+
+keyset, err := jwk.Fetch(ctx, "http://localhost:3000/api/auth/jwks")
+token, err := jwt.ParseRequest(r, jwt.WithKeySet(keyset))
+
+userID, _ := token.Subject()
+email, _ := token.Get("email")
+```
+
+### Python (using PyJWT)
+
+```python
+import jwt
+from jwt import PyJWKClient
+
+jwks_client = PyJWKClient("http://localhost:3000/api/auth/jwks")
+key = jwks_client.get_signing_key_from_jwt(token)
+
+payload = jwt.decode(
+    token, 
+    key.key, 
+    algorithms=["EdDSA", "RS256"],
+    issuer="http://localhost:3000",
+    audience="http://localhost:3000"
+)
+```
+
+### Node.js (using jose)
+
+```typescript
+import { createRemoteJWKSet, jwtVerify } from "jose"
+
+const JWKS = createRemoteJWKSet(
+  new URL("http://localhost:3000/api/auth/jwks")
+)
+
+const { payload } = await jwtVerify(token, JWKS, {
+  issuer: "http://localhost:3000",
+  audience: "http://localhost:3000",
+})
+```
+
+## Security Considerations
+
+### Token Expiration
+
+JWT tokens are short-lived by default (typically 15 minutes). Always check the `exp` claim:
+
+```typescript
+const jwt = decodeJwt(token)
+const isExpired = jwt.exp && jwt.exp < Date.now() / 1000
+```
+
+### HTTPS in Production
+
+Always use HTTPS in production. JWT tokens are bearer tokens - anyone with the token can impersonate the user.
+
+```bash
+# Production
+BETTER_AUTH_URL=https://yourdomain.com
+```
+
+### Issuer and Audience Validation
+
+Always validate `iss` and `aud` claims to prevent token reuse across services:
+
+```typescript
+const { payload } = await jwtVerify(token, JWKS, {
+  issuer: process.env.BETTER_AUTH_URL,
+  audience: process.env.BETTER_AUTH_URL,
+})
+```
+
+### Database Security
+
+Use strong credentials and limit database access:
+
+```bash
+# Use environment-specific credentials
+DATABASE_URL=postgresql://app_user:strong_password@db.internal:5432/production_db
+```
+
+### Secret Management
+
+Never commit secrets to version control. Use environment variables or secret management services:
+
+```bash
+# Generate a strong secret
+openssl rand -base64 32
+```
+
+## Related
+
+- [Auth Client](/api/auth-client) - Client-side authentication methods
+- [Database Setup](/setup/database) - Drizzle ORM configuration
+- [Environment Variables](/setup/environment) - Complete environment setup guide

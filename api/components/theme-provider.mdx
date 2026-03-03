@@ -1,0 +1,266 @@
+---
+title: 'ThemeProvider'
+description: 'Client component that wraps next-themes to provide dark mode, light mode, and system theme support'
+---
+
+## Overview
+
+The `ThemeProvider` component wraps the app with `next-themes` functionality, enabling dark mode, light mode, and system preference detection. It's configured to use class-based theming with dark mode as the default.
+
+## Import
+
+```tsx
+import { ThemeProvider } from "@/components/theme-provider"
+```
+
+## Usage
+
+Wrap your app in the root layout:
+
+```tsx app/layout.tsx
+import { ThemeProvider } from "@/components/theme-provider"
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <body>
+        <ThemeProvider>{children}</ThemeProvider>
+      </body>
+    </html>
+  )
+}
+```
+
+<Warning>
+  Add `suppressHydrationWarning` to the `<html>` tag to prevent warnings when next-themes modifies the class attribute during hydration.
+</Warning>
+
+## Props
+
+<ParamField path="children" type="ReactNode" required>
+  The app content to wrap with theme context
+</ParamField>
+
+## Configuration
+
+The component is pre-configured with the following settings:
+
+<ParamField path="attribute" type="string" default="class">
+  Uses CSS class (`dark`) for theme switching rather than data attributes
+</ParamField>
+
+<ParamField path="defaultTheme" type="string" default="dark">
+  Sets dark mode as the default theme for new users
+</ParamField>
+
+<ParamField path="enableSystem" type="boolean" default={true}>
+  Enables automatic system preference detection
+</ParamField>
+
+<ParamField path="disableTransitionOnChange" type="boolean" default={false}>
+  Allows CSS transitions when theme changes for smooth color transitions
+</ParamField>
+
+## Theme Toggle Integration
+
+Use with the `ThemeToggle` component to allow users to switch themes:
+
+```tsx
+import { ThemeToggle } from "@/components/theme-toggle"
+
+export function Navbar() {
+  return (
+    <nav>
+      <div>My App</div>
+      <ThemeToggle />
+    </nav>
+  )
+}
+```
+
+## Accessing Theme in Components
+
+Use the `useTheme` hook from `next-themes` in any component:
+
+```tsx
+"use client"
+
+import { useTheme } from "next-themes"
+
+export function ThemeAwareComponent() {
+  const { theme, setTheme } = useTheme()
+
+  return (
+    <div>
+      <p>Current theme: {theme}</p>
+      <button onClick={() => setTheme("dark")}>Dark</button>
+      <button onClick={() => setTheme("light")}>Light</button>
+      <button onClick={() => setTheme("system")}>System</button>
+    </div>
+  )
+}
+```
+
+## Implementation Details
+
+```tsx theme-provider.tsx:1-18
+"use client"
+
+import { ThemeProvider as NextThemesProvider } from "next-themes"
+import type { ReactNode } from "react"
+
+export function ThemeProvider({ children }: { children: ReactNode }) {
+    return (
+        <NextThemesProvider
+            attribute="class"
+            defaultTheme="dark"
+            enableSystem
+            disableTransitionOnChange={false}
+        >
+            {children}
+        </NextThemesProvider>
+    )
+}
+```
+
+## Theme Toggle Component
+
+The boilerplate includes a pre-built theme toggle with light, dark, and system options:
+
+```tsx theme-toggle.tsx:7-38
+export function ThemeToggle() {
+    const { theme, setTheme } = useTheme()
+    const [mounted, setMounted] = useState(false)
+
+    useEffect(() => setMounted(true), [])
+
+    if (!mounted) return <div className="size-9" />
+
+    const options = [
+        { value: "light", icon: Sun, label: "Light mode" },
+        { value: "dark", icon: Moon, label: "Dark mode" },
+        { value: "system", icon: Monitor, label: "System preference" },
+    ] as const
+
+    return (
+        <div className="flex items-center gap-1 rounded-full border border-border/50 bg-muted/50 p-1 backdrop-blur-sm">
+            {options.map(({ value, icon: Icon, label }) => (
+                <button
+                    key={value}
+                    onClick={() => setTheme(value)}
+                    aria-label={label}
+                    className={`rounded-full p-1.5 transition-colors ${
+                        theme === value
+                            ? "bg-background text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                    }`}
+                >
+                    <Icon className="size-4" />
+                </button>
+            ))}
+        </div>
+    )
+}
+```
+
+## CSS Configuration
+
+The theme system uses CSS variables defined in `globals.css`. The `dark` class toggles these variables:
+
+```css globals.css
+:root {
+  --background: 0 0% 100%;
+  --foreground: 0 0% 3.9%;
+  /* ... more light theme variables */
+}
+
+.dark {
+  --background: 0 0% 3.9%;
+  --foreground: 0 0% 98%;
+  /* ... more dark theme variables */
+}
+```
+
+## Avoiding Flash of Unstyled Content
+
+### HTML Attribute
+
+Add `suppressHydrationWarning` to prevent React warnings:
+
+```tsx
+<html lang="en" suppressHydrationWarning>
+```
+
+### Server-Side Rendering
+
+The theme toggle component handles SSR properly by:
+
+1. Returning a placeholder during server render (`if (!mounted)`)
+2. Updating after client-side hydration (`useEffect(() => setMounted(true), [])`)
+
+## Customization
+
+### Change Default Theme
+
+```tsx
+<ThemeProvider defaultTheme="light">{children}</ThemeProvider>
+```
+
+### Disable System Preference
+
+```tsx
+<ThemeProvider enableSystem={false}>{children}</ThemeProvider>
+```
+
+### Disable Transitions
+
+Useful if theme changes cause layout shifts:
+
+```tsx
+<ThemeProvider disableTransitionOnChange>{children}</ThemeProvider>
+```
+
+### Use Data Attribute Instead of Class
+
+```tsx
+<ThemeProvider attribute="data-theme">{children}</ThemeProvider>
+```
+
+Then update your CSS:
+
+```css
+[data-theme="dark"] {
+  /* dark theme styles */
+}
+```
+
+## Example: Full Layout Integration
+
+From the Auth UI Boilerplate:
+
+```tsx app/layout.tsx:22-36
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      >
+        <ThemeProvider>{children}</ThemeProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+## Related Components
+
+- [LoginRequired](/api/components/login-required) - Protects pages from unauthenticated access
+- Theme Toggle (built-in) - UI component for switching themes
