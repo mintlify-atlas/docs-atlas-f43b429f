@@ -1,0 +1,121 @@
+{
+  "projectType": "saas",
+  "projectName": "Auth UI Boilerplate",
+  "projectDescription": "Next.js authentication boilerplate with Better Auth, Drizzle ORM, and JWT/JWKS backend integration",
+  "theme": "palm",
+  "primaryColor": "#3b82f6",
+  "lightColor": "#60a5fa",
+  "darkColor": "#2563eb",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "manual-setup"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment-variables",
+              "configuration/google-oauth",
+              "configuration/database"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/authentication",
+              "features/jwt-tokens",
+              "features/api-proxy",
+              "features/database-schema"
+            ]
+          },
+          {
+            "group": "Backend Integration",
+            "pages": [
+              "backend/overview",
+              "backend/jwks-verification",
+              "backend/go-example",
+              "backend/python-example",
+              "backend/express-example"
+            ]
+          },
+          {
+            "group": "Database",
+            "pages": [
+              "database/overview",
+              "database/schema",
+              "database/migrations",
+              "database/adding-tables"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/project-structure",
+              "development/api-clients",
+              "development/customization",
+              "development/dev-container"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Auth Client",
+            "pages": [
+              "api/auth-client",
+              "api/auth-server"
+            ]
+          },
+          {
+            "group": "API Clients",
+            "pages": [
+              "api/fetch-client",
+              "api/axios-client"
+            ]
+          },
+          {
+            "group": "Components",
+            "pages": [
+              "api/components/login-required",
+              "api/components/theme-provider"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Email/password and Google OAuth authentication with Better Auth",
+    "PostgreSQL database with Drizzle ORM",
+    "JWT token generation with JWKS endpoint for backend verification",
+    "API proxy with automatic JWT injection",
+    "Pre-configured database schema for auth tables",
+    "Dev Container support with PostgreSQL",
+    "TypeScript API clients (fetch and axios) with automatic token refresh",
+    "shadcn/ui components with dark mode support"
+  ],
+  "publicApiSurface": [
+    "authClient.signIn.email()",
+    "authClient.signIn.social()",
+    "authClient.signUp.email()",
+    "authClient.signOut()",
+    "authClient.useSession()",
+    "authClient.token()",
+    "apiClient.request()",
+    "apiClient.verifyAuth()",
+    "auth.api.getToken()",
+    "/api/auth/jwks",
+    "/api/auth/callback/google",
+    "/api/[...path] (proxy route)"
+  ]
+}
